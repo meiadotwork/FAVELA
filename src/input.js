@@ -42,13 +42,29 @@ export function consume(action) {
   return was;
 }
 
+/** Drive an action from outside -- an on-screen button, or a test harness. */
+export function setAction(action, down) {
+  set(action, down);
+}
+
 export function initInput(canvas, onFirstInteraction = () => {}) {
-  let greeted = false;
-  const greet = () => {
-    if (greeted) return;
-    greeted = true;
-    onFirstInteraction();
+  const greet = once(onFirstInteraction);
+  initKeyboard(greet);
+  initTouch(canvas, greet);
+}
+
+function once(fn) {
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    fn();
   };
+}
+
+/** Keyboard only: what a page with its own on-screen buttons wants. */
+export function initKeyboard(onFirstInteraction = () => {}) {
+  const greet = once(onFirstInteraction);
 
   addEventListener('keydown', (e) => {
     const action = KEY_MAP[e.code];
@@ -70,8 +86,6 @@ export function initInput(canvas, onFirstInteraction = () => {}) {
     held.clear();
     for (const a of ACTIONS) set(a, false);
   });
-
-  initTouch(canvas, greet);
 }
 
 // Touch layout: the left half of the screen is a virtual stick whose direction

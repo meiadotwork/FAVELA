@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="description" content="FAVELA - bancada de teste: animações, casa de um andar, cobertura e tiro.">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>FAVELA · Teste de Mecânicas</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b0b0d'/%3E%3Cpath d='M4 26V14l6-4 6 4v4h4v-6l5-3 4 3v14z' fill='%23f2c14e'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="mecanica.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="boot"><span>CARREGANDO</span><div id="bar"><i></i></div></div>
+
+<!-- Readout: what the mechanics say they are doing, this instant. -->
+<div id="hud" class="panel">
+  <div class="row"><b>CLIPE</b><span id="hud-clip">-</span></div>
+  <div class="row"><b>QUADRO</b><span id="hud-frame">-</span></div>
+  <div class="row"><b>POSTURA</b><span id="hud-stance">-</span></div>
+  <div class="row"><b>APOIO</b><span id="hud-support">-</span></div>
+  <div class="row"><b>COBERTURA</b><span id="hud-cover">-</span></div>
+  <div class="row"><b>MUNIÇÃO</b><span id="hud-ammo">-</span></div>
+  <div class="row"><b>TIROS</b><span id="hud-shots">-</span></div>
+  <div class="row"><b>FPS</b><span id="hud-fps">-</span></div>
+</div>
+
+<!-- Every clip on the sheet, playable on its own. -->
+<div id="clips" class="panel">
+  <div class="panel-title">ANIMAÇÕES <button id="clips-toggle" class="mini">—</button></div>
+  <div id="clip-list" class="chips"></div>
+  <div class="panel-row">
+    <button id="btn-freeze" class="mini wide">CONGELAR</button>
+    <button id="btn-prev" class="mini">◀ QUADRO</button>
+    <button id="btn-next" class="mini">QUADRO ▶</button>
+  </div>
+  <div class="panel-row">
+    <button id="btn-debug" class="mini wide">MOSTRAR COLISÃO</button>
+    <button id="btn-tracer" class="mini wide">RASTRO: ALGUNS</button>
+  </div>
+  <div class="panel-row">
+    <button id="btn-ground" class="mini wide">TROCAR CHÃO</button>
+    <button id="btn-house" class="mini wide">TROCAR CASA</button>
+  </div>
+</div>
+
+<!-- The controls, spelled out. Hold to walk, hold to shoot. -->
+<div id="pad">
+  <div class="cluster left">
+    <button class="key hold" data-hold="left">◀<small>ANDAR</small></button>
+    <button class="key hold" data-hold="right">▶<small>ANDAR</small></button>
+    <button class="key hold" data-hold="run">⏩<small>CORRER</small></button>
+  </div>
+
+  <div class="cluster mid">
+    <button class="key tap" data-tap="up">▲<small>LEVANTAR / SUBIR</small></button>
+    <button class="key tap" data-tap="down">▼<small>AGACHAR / DEITAR</small></button>
+    <button class="key act" id="btn-hurt">✚<small>TOMAR TIRO</small></button>
+    <button class="key act" id="btn-revive">↺<small>REVIVER</small></button>
+  </div>
+
+  <div class="cluster right">
+    <button class="key fire hold" data-hold="fire">●<small>ATIRAR</small></button>
+  </div>
+</div>
+
+<div id="hint">
+  TECLADO: ← → ANDAR · SHIFT CORRER · ↓ AGACHAR/DEITAR · ↑ LEVANTAR · ESPAÇO ATIRAR ·
+  SUBA A ESCADA ANDANDO · ATRÁS DA PAREDE VOCÊ NÃO ATIRA, CHEGUE NA QUINA OU NA PORTA
+</div>
+
+<script type="module" src="src/lab/lab.js"></script>
+</body>
+</html>

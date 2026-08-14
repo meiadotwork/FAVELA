@@ -14,6 +14,9 @@ export const assets = {
   cars: [],        // parked vehicles, used as cover
   caveirao: null,  // the police armoured truck
   fx: {},          // impact effects, by kind
+  ground: [],      // cross-section strips of street, tiled along the lane
+  stairs: [],      // flights, with the profile of their steps in the manifest
+  layer1: [],      // one-storey houses that stand in the player's own layer
 };
 
 function loadImage(src) {
@@ -25,7 +28,14 @@ function loadImage(src) {
   });
 }
 
-export async function loadAssets(base = 'assets', onProgress = () => {}) {
+/**
+ * Load the manifest and everything it names.
+ *
+ * `opts.stage` adds the pieces only the mechanics bench draws -- ground strips,
+ * stairs and the one-storey houses -- which the game itself never asks for and
+ * should not spend a megabyte and a half fetching.
+ */
+export async function loadAssets(base = 'assets', onProgress = () => {}, opts = {}) {
   const manifest = await (await fetch(`${base}/assets.json`)).json();
   assets.manifest = manifest;
 
@@ -45,6 +55,13 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
   if (manifest.caveirao) {
     jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
       .then((img) => { assets.caveirao = img; }));
+  }
+  if (opts.stage) {
+    for (const key of ['ground', 'stairs', 'layer1']) {
+      (manifest[key] || []).forEach((p, i) => {
+        jobs.push(loadImage(`${base}/${p.file}`).then((img) => { assets[key][i] = img; }));
+      });
+    }
   }
   if (manifest.civilians) {
     jobs.push(loadImage(`${base}/${manifest.civilians.sheet}`)

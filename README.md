@@ -27,6 +27,45 @@ filesystem and can be hosted anywhere a page can. Each module keeps its own
 scope inside the bundle, publishing its exports to one shared namespace, so two
 modules that both declare `ctx` at the top level still cannot collide.
 
+## The mechanics bench
+
+`mecanica.html` is not the game: it is one character, one street, one
+single-storey house and a flight of stairs, built to try the mechanics on their
+own before they go into a level. Open it the same way the game opens.
+
+```
+python3 -m http.server 8080
+# then http://localhost:8080/mecanica.html
+```
+
+It fills the window, every action is on a labelled button, and the panel on the
+right lists every animation on the sheet so any of them can be played, frozen
+and stepped a frame at a time. The readout on the left says which clip is
+running, which frame it is on, what the body is standing on and where it is
+relative to the house.
+
+What it is for:
+
+- **Animation.** The clip table, the events written on the clips, the priority
+  rules, and a walk cycle stepped by distance travelled rather than by the clock
+  so the feet do not skate. Shots are fired *by* the animation: the trigger
+  starts the shooting clip and the round leaves on the frame the muzzle flash is
+  drawn on.
+- **The three postures**, and the moves between them.
+- **Climbing.** The stairs are walked up, not mounted: the flight carries the
+  profile of its own treads, and a climb is simply what walking up a steep
+  enough surface is called. The top tread is the roof.
+- **The cover corner.** The house stands in the player's own layer, so it is
+  drawn *in front of* the body: standing behind the wall really does hide you,
+  and you cannot shoot out of it either — step to the corner or into a doorway,
+  which is a hole in the wall that bullets go through.
+- **Fast bullets.** A round crosses the lane in about a fifth of a second and
+  most of them leave nothing behind; only some carry a short tracer, and the
+  button cycles that between some, all and none.
+
+Buttons also swap the ground and the house, and switch on an overlay showing
+every surface, the wall band, the doorways and the body's own box.
+
 ## Controls
 
 | | |
@@ -87,20 +126,30 @@ down from.
 ## Layout
 
 ```
-index.html, style.css
+index.html, style.css          the game
+mecanica.html, mecanica.css    the mechanics bench
 src/
   game.js      screens, waves, the main loop
   civilians.js residents of the lane, and what makes them run
   level.js     level layout, cover boxes, the bullet-blocking rule
   actors.js    stances, shooting, enemy AI
+  anim.js      clips, the animator, events, priorities, distance-driven playback
   render.js    parallax favela, cover, weather, HUD
   assets.js    atlas loading and anchored sprite drawing
   audio.js     synthesised gunfire, fireworks, sirens
   input.js     keyboard and touch, flattened to named actions
+  lab/
+    lab.js     the bench: boot, controls, loop
+    stage.js   ground, the one-storey house, the stairs, what stops a bullet
+    body.js    the character controller, driving anim.js
+    shots.js   fast bullets and their occasional tracers
+    draw.js    the stage, in depth order
+    ui.js      on-screen buttons, clip list, readout
 tools/
-  slicer.py         cuts the raw sprite sheets into frames
-  build_assets.py   builds the runtime atlases and manifest
-  bundle.py         folds the game into one self-contained HTML file
+  slicer.py             cuts the raw sprite sheets into frames
+  build_assets.py       builds the runtime atlases and manifest
+  build_stage_assets.py cuts the ground, stairs and one-storey houses
+  bundle.py             folds the game into one self-contained HTML file
 assets/        generated — atlases, buildings, assets.json
 dist/          generated — the single-file build (not committed)
 ```
@@ -113,7 +162,26 @@ and is committed, so the game runs without the toolchain. To rebuild:
 ```
 pip install pillow numpy scipy
 python3 tools/build_assets.py /path/to/raw-drop assets
+python3 tools/build_stage_assets.py /path/to/raw-drop assets
 ```
+
+The second script adds the three keys the mechanics bench needs — `ground`,
+`stairs` and `layer1` — and leaves the rest of the manifest alone. It measures
+what it cuts rather than being told:
+
+- **The roof line** of a house is the first row the sprite is wide across,
+  scanned from the top, so the water tank and the chimney are passed over and
+  the flat slab under them is what a body stands on.
+- **The doorways** are the columns that stay near-black from waist height down
+  to the doorstep — the shuttered windows sit high and never do — and they
+  become the holes bullets pass through.
+- **The stairs** keep the profile of their own treads. It is taken as the top of
+  the solid mass in each column, not the topmost pixel, or a body would walk up
+  the handrail; the rail posts are as solid as a step, so the profile is opened
+  with a window wider than a post and narrower than a tread to take them off.
+  The flight is then scaled by its top tread rather than by its bounding box,
+  since the rail carries on above the last step and a flight scaled by the
+  sprite lands a metre short of the roof it has to reach.
 
 Five things in there are worth knowing about, because the raw art fought back:
 
