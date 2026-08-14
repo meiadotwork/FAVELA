@@ -1,8 +1,8 @@
 # FAVELA
 
-A 2D cover shooter in HTML5. You hold a lane in the favela against crews coming
-up it from both ends, and the whole fight is decided by where you stand, how low
-you stand there, and when you decide to stand up.
+A 2D cover shooter in HTML5. You hold one corner of one house against a crew
+coming up the lane at you, and the whole fight is decided by where you stand,
+how low you stand there, and when you put your shoulders past the corner.
 
 No build step, no dependencies — open it over a local server and it runs.
 
@@ -30,24 +30,26 @@ modules that both declare `ctx` at the top level still cannot collide.
 
 | | |
 |---|---|
-| Arrows / WASD | Move |
+| Arrows / WASD | Move — and, pressed into the corner, lean out past it |
 | Shift | Run |
 | ↓ | Crouch, then go prone |
 | ↑ | Stand back up |
 | Space / left mouse | Fire |
 | Mouse | Aim — move it and it takes over; leave it and the aim goes back to automatic |
 | R | Reload |
-| 1 2 3 | Rifle, pistol, shotgun |
+| 1 2 3 / E | Rifle, pistol, shotgun |
+| Z | Zoom the camera out and back |
 | C | Cycle stance · P Pause · M Mute |
 | F1 | Draw the mechanics |
 
-On touch, the left of the screen is two invisible walk zones — the near half
-walks left, the far half walks right, and sliding your thumb between them turns
-you round without lifting it. The right carries a row of five buttons along the
-bottom — run, weapon, crouch, reload and the trigger, biggest and nearest the
-corner — with run latching on until you tap it again. Anywhere on the open right of the screen is also the trigger, and the
-black bars either side of the picture count as the edge they sit against, so a
-thumb resting off the canvas still works. Hold the phone sideways.
+On touch there is a direction ring on the left and a row of buttons on the
+right — zoom, weapon, crouch, reload and the trigger, biggest and nearest the
+corner. The ring is analog: how far you push it is how fast you walk, and
+pushing it to the rim is the run, which is why there is no run button. Anywhere
+on the left grabs the ring wherever your thumb lands, anywhere on the open right
+is also the trigger, and the black bars either side of the picture count as the
+edge they sit against, so a thumb resting off the canvas still works. Hold the
+phone sideways.
 
 ## How the fight works
 
@@ -56,26 +58,27 @@ its own scale — the sheets are captioned 1.78 m at 110 px — so the simulatio
 written in real units and converted to pixels in exactly one place. A 4 m/s
 sprint is a sprint, and a 14 m shotgun range is a distance you can pace out.
 
-**Stance is the spine of it.** Each stance sets four numbers: how tall your body
+**The map is one house and one corner.** The building is set back and drawn
+behind you, and what actually stands in the lane is its corner: 0.9 m of wall at
+full height that stops everything and that nobody walks through. Everything
+arrives from up the lane, so the far side of that corner is safe ground and the
+near side is the fight. The door is 2 m, the man is 1.70 m, and every other
+measurement in the art and the simulation is stepped off those two.
+
+**Leaning is the whole peek.** You cannot walk around a corner in a lane that
+only has one dimension, so pressing into it leans you out instead: hold toward
+the corner and your shoulders come past it over about a quarter of a second,
+let go and they come back. The lean moves the body, not just the gun — hitbox,
+muzzle and sprite all read the same position — so being able to shoot and being
+able to be shot arrive together, which is the trade the whole map is built on.
+
+**Stance is the other half.** Each stance sets four numbers: how tall your body
 is, how high your muzzle sits, how fast you move, and how steady you shoot.
-Cover is a box with a top edge, and a round is stopped when it crosses a box
-below that edge. Every situation in the game falls out of those numbers:
-
-- Crouch behind a low wall and incoming fire hits the wall — but so does yours.
-- Stand up and your muzzle clears it, and so does the enemy's line to you.
-- A wall shorter than 1.15 m is no good crouching: you have to go prone, and
-  crawling away from it costs the best part of a second.
-- Cars are bulletproof to the sill and glass above it, so a standing shot goes
-  through the windows while a crouched one hits the bodywork.
-- A house corner juts into the lane at full height and no stance clears it. You
-  step out past the edge to shoot and step back in to be safe — the enemy AI
-  uses corners exactly the same way.
-- The caveirão is armoured throughout, with no glass band. Nothing goes through
-  it, which is why the bot that hugs it lands a third of its shots in it.
-
+Crouching cuts your spread by a third and lying down by nearly two thirds, which
+at twenty-five metres is the difference between hitting a prone man and not.
 Changing stance takes time — 0.22 s to drop to a crouch, 0.85 s to get up off
 the floor — and you cannot fire mid-change. Half-way through a transition your
-body height is genuinely half-way too, which is how you get shot standing up.
+body height is genuinely half-way too.
 
 **Aim finds what is exposed.** The shot is steered onto the nearest enemy the
 muzzle can actually reach, and the aim point is the highest-value part of him
@@ -84,12 +87,18 @@ shoulders if that is all that clears his wall. Heads take two and a half times
 damage, so peeking is expensive for both sides. Move the mouse and you take the
 aim over yourself; leave it alone and it goes back to automatic.
 
-**Weapons answer that geometry differently.** The rifle is a steady stream that
-reaches down the lane and blooms as you hold the trigger. The pistol hits harder
-per shot and blooms faster. The shotgun throws eight pellets that spread wide
-and fall off hard past five metres — murderous across a doorway, close to
-useless down the length of the alley — and it feeds one shell at a time, so a
-reload can be cut short to get one round off.
+**Weapons answer that geometry differently.** The rifle is the long gun: full
+damage to twenty-six metres, still lethal at sixty, three hundred rounds in
+reserve, and it blooms as you hold the trigger. The pistol hits harder per shot
+inside twelve metres and blooms faster. The shotgun throws eight pellets that
+fall off hard past five metres — murderous across a doorway, useless down the
+lane — and it feeds one shell at a time, so a reload can be cut short to get one
+round off.
+
+**The camera can be pulled back.** Zoom steps through 1x, 0.72x and 0.52x,
+showing 20, 27 or 38 metres of lane. At the far setting you can see the whole
+crew coming and pick the one to shoot first; at the near one you can see what
+you are aiming at.
 
 **Fire that misses still counts.** A round passing within about a metre
 suppresses whoever it passes, and only along the stretch it actually flew — a
@@ -99,9 +108,13 @@ enough and he gives the box up as a bad job and works his way to another one,
 which is what stops a firefight settling into a stalemate.
 
 **The other side runs the same code.** Enemies are actors with a brain filling
-in the intent instead of a keyboard: they pick a box by how far it sits from
-*you* rather than how close it is to them, work out which side of it faces the
-threat, and then either shoot over it and duck, or step around it and step back.
+in the intent instead of a keyboard. On this map they have nothing to hide
+behind, so they walk to the range their weapon wants — twenty-four metres for a
+rifle, seven for a shotgun, each man biased a little differently so a crew
+spreads down the lane instead of forming a rank — and then get down and fight
+from there, prone past twenty metres, where a man is a very small thing to hit.
+They fire from a stop, never on the move. Given cover they use it the same way
+you do, shooting over it and ducking, or stepping past a corner and back.
 Their aim is detuned deliberately — error that decays the longer they have you
 in sight but never reaches zero, drift so a burst walks across you instead of
 stapling itself to one spot, damage at half, and no head multiplier. Perfect
@@ -117,7 +130,8 @@ muzzle to you that goes green when it is clear and red where it is blocked.
 index.html, style.css
 src/
   tuning.js    every number in the game, in metres and seconds
-  world.js     the lane, the cover boxes, and the bullet-blocking rule
+  world.js     the lane, the corner, and the bullet-blocking rule
+  props.js     the house, painted to the same measurements
   actor.js     stance, movement, weapon handling, health
   combat.js    rounds in flight, hit tests, damage, suppression
   ai.js        the enemy brain
@@ -206,14 +220,26 @@ let them cut with no table at all.
 Sound is synthesised at runtime — the drop had no audio, and a firefight is
 mostly noise bursts.
 
+## The house
+
+The house is painted in `props.js` rather than loaded, because the reference for
+it arrived as a picture in a conversation and not as a file in the repository.
+It is drawn to the stated measurements — 2 m door, 5.6 m wall, 2.9 m to the roof
+slab, a 0.8 m tank on top — from brick, plaster fields with the render come away
+in patches, a louvred window, cobogo blocks, algae under the roof line and weeds
+at the footing.
+
+If the real artwork turns up, it wins: add it to `assets/props/` and name it in
+the manifest as `"house": {"file": "props/casa.webp"}`, and the renderer draws
+that instead, scaled to the same 5.6 m. Nothing else changes.
+
 ## Not in this build
 
-The mechanics core was rewritten from scratch and the content that used to sit
-on top of it has not been rebuilt yet: no character select, no numbered levels
-with their own time of day and weather, no residents walking the lane, no
-ladders or rooftops, and no police raid opening with fireworks and sirens. The
-art for all of it is still in `assets/` and the manifest still carries the
-civilians, so it can go back on top of the new core.
+The map was cleared back to the one house on purpose. The rest of the content is
+not rebuilt: no character select, no numbered levels with weather, no residents
+in the lane, no ladders or rooftops, no cars or caveirão, and no police raid
+opening. The art for all of it is still in `assets/` and the manifest still
+carries it, so it can go back on top when the shooting is right.
 
 ## Credit
 

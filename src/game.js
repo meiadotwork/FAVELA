@@ -9,14 +9,14 @@ import { STANCE_ORDER, FEEL, HEALTH, WEAPONS } from './tuning.js';
 import { buildArena, rng, range } from './world.js';
 import {
   makeActor, updateActor, separate, setStance, cycleStance,
-  centre, muzzleY, weaponOf, startReload,
+  centre, muzzleX, muzzleY, weaponOf, startReload,
 } from './actor.js';
 import { makeBrain, updateBrain } from './ai.js';
 import { makeBullet, stepBullets, aimPoint } from './combat.js';
 import { makeFx, updateFx, flash, casing, mark, blood, shake, hitstop, kickFor } from './fx.js';
-import { makeInput, moveAxis, anyPress } from './input.js';
+import { makeInput, moveAxis, stickRun, anyPress } from './input.js';
 import {
-  initRender, buildBackdrop, renderFrame, updateCamera, view, toWorldX, toWorldY,
+  initRender, buildBackdrop, renderFrame, updateCamera, setZoom, view, toWorldX, toWorldY,
 } from './render.js';
 import { drawHud, drawTitle, drawPause, drawDead, drawRotateHint } from './hud.js';
 import { drawDebug } from './debug.js';
@@ -51,7 +51,6 @@ const game = {
   banner: '',
   bannerT: 0,
   debug: false,
-  runLock: false,          // a phone has no shift key to hold
   lastDt: STEP,
   input: null,
 };
@@ -136,7 +135,7 @@ function startRun() {
 
   const p = makeActor({
     key: 'p1', name: 'Branco', weapon: 'rifle', team: 'player',
-    player: true, x: game.arena.spawn.player, hp: HEALTH.player,
+    player: true, x: game.arena.spawn.player, facing: game.arena.threat, hp: HEALTH.player,
   });
   game.player = p;
   game.actors.push(p);
@@ -146,19 +145,17 @@ function startRun() {
 
 function spawnWave() {
   game.wave++;
-  const count = Math.min(9, 2 + Math.floor(game.wave * 1.3));
+  const count = Math.min(8, 2 + Math.floor(game.wave * 1.2));
   const police = game.wave >= 3;
+  const [near, far] = game.arena.spawn.enemy;
   for (let i = 0; i < count; i++) {
     const pool = police && rand() < 0.4 ? [ENEMY_KINDS[2]] : ENEMY_KINDS.slice(0, 2);
     const kind = pool[(rand() * pool.length) | 0];
 
-    // They come up the lane from off screen -- far enough not to appear out of
-    // thin air, near enough that the fight starts rather than being walked to.
-    const fromLeft = rand() < 0.5;
-    const side = fromLeft ? -1 : 1;
-    const away = range(rand, [16, 30]);
-    const x = Math.max(2, Math.min(game.arena.length - 2, game.player.x + side * away));
-    const a = makeActor({ ...kind, x, facing: -side });
+    // One direction, always: up the lane from the far end, spread out so they
+    // arrive as a column rather than a wall.
+    const x = Math.min(game.arena.length - 2, range(rand, [near, far]));
+    const a = makeActor({ ...kind, x, facing: -game.arena.threat });
     a.brain = makeBrain(a);
     // Later waves come up the lane already switched on.
     a.brain.timer = range(rand, [0.2, 1.4]) + i * 0.12;
@@ -180,7 +177,9 @@ function spawnWave() {
  * reach -- which may be only the head showing over a wall.
  */
 function autoTarget(p) {
-  const from = { x: p.x, y: muzzleY(p) };
+  // From the muzzle, not the body: the muzzle is what the round leaves, and at
+  // a corner those are on opposite sides of a wall.
+  const from = { x: muzzleX(p), y: muzzleY(p) };
   let best = null;
   for (const a of game.actors) {
     if (a.player || !a.alive) continue;
@@ -203,14 +202,7 @@ function readPlayer(input, dt) {
   it.move = moveAxis(input);
   it.fire = input.down('fire');
   if (input.hit('reload')) it.reload = true;   // held until a step consumes it
-
-  // Shift is a hold; a thumb is a toggle. Both end up as the same intent.
-  if (input.touch.active) {
-    if (input.hit('run')) game.runLock = !game.runLock;
-  } else {
-    game.runLock = false;
-  }
-  it.run = input.down('run') || game.runLock;
+  it.run = input.down('run') || stickRun(input);
 
   if (input.hit('w1')) it.swap = 'rifle';
   if (input.hit('w2')) it.swap = 'pistol';
@@ -218,6 +210,7 @@ function readPlayer(input, dt) {
   if (input.hit('swap')) {
     it.swap = WEAPON_CYCLE[(WEAPON_CYCLE.indexOf(p.weapon) + 1) % WEAPON_CYCLE.length];
   }
+  if (input.hit('zoom')) { setZoom(view.zoomStep + 1); playUi(view.zoom > 0.8); }
 
   // Down goes one stance lower, up goes one higher: stand, crouch, prone.
   if (input.hit('down')) cycleStance(p, 1);
@@ -345,12 +338,15 @@ async function boot() {
   // A quiet lane to look at behind the title screen.
   game.arena = buildArena(4);
   buildBackdrop(game.arena);
-  game.player = makeActor({ key: 'p1', weapon: 'rifle', team: 'player', player: true, x: game.arena.spawn.player });
+  game.player = makeActor({
+    key: 'p1', weapon: 'rifle', team: 'player', player: true, x: game.arena.spawn.player,
+  });
   game.actors = [game.player];
   view.cam.x = game.player.x;
 
   // The whole state, reachable from the console -- tuning a fight is a lot
   // easier when you can read the numbers out of it while it is running.
+  game.view = view;
   window.FAVELA = game;
 
   requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });

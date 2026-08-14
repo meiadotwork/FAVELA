@@ -10,7 +10,7 @@
 import { AI, STANCES, WEAPONS, SUPPRESSION, deg } from './tuning.js';
 import { rng, range } from './world.js';
 import { aimPoint } from './combat.js';
-import { muzzleX, muzzleY, bodyHeight, centre, weaponOf } from './actor.js';
+import { muzzleX, muzzleY, bodyHeight, centre, weaponOf, posX } from './actor.js';
 
 const rand = rng(0x5eed);
 
@@ -26,6 +26,9 @@ export function makeBrain(a) {
     hard: false,          // cover it must step around rather than shoot over
     up: false,            // currently peeking
     burst: 0,
+    // Each of them wants a slightly different distance, so a crew spreads down
+    // the lane instead of forming a rank at one range.
+    rangeBias: 0.75 + rand() * 0.55,
     pinnedFor: 0,
     reaction: 0,
     settle: 0,
@@ -37,7 +40,7 @@ export function makeBrain(a) {
 
 /** What of the target this muzzle can reach right now, if anything. */
 function sight(game, a, t) {
-  if (Math.abs(t.x - a.x) > AI.sightRange) return null;
+  if (Math.abs(posX(t) - a.x) > AI.sightRange) return null;
   return aimPoint(game.arena, { x: muzzleX(a), y: muzzleY(a) }, t);
 }
 
@@ -61,7 +64,7 @@ function chooseCover(game, a, t, avoid = null) {
   const own = Math.sign(a.x - t.x) || 1;              // which end of the lane it is on
   let best = null;
   for (const cover of game.arena.covers) {
-    if (cover === avoid) continue;
+    if (cover === avoid || cover.mine) continue;   // his corner, not theirs
     const reach = Math.abs(cover.x - a.x);
     if (reach > AI.coverWalk) continue;                // further than it will go
     if (Math.sign(cover.x - t.x) !== own) continue;    // never cross the player
@@ -123,7 +126,7 @@ export function updateBrain(a, game, dt) {
   b.sway += dt * 2.2;
   b.error = deg(spread) * (Math.sin(b.sway) * 0.6 + (rand() - 0.5) * 0.8) * (1 + a.suppression);
 
-  it.aimAt = spot || { x: t.x, y: centre(t) };
+  it.aimAt = spot || { x: posX(t), y: centre(t) };
 
   // Cover is re-picked when the one it holds stops making sense -- the player
   // walked around it, or the fight moved on down the lane.
@@ -152,7 +155,7 @@ export function updateBrain(a, game, dt) {
     }
   }
   const hurt = a.hp / a.maxHp < AI.retreatAt;
-  const wantRange = AI.desiredRange[a.weapon] ?? 12;
+  const wantRange = (AI.desiredRange[a.weapon] ?? 12) * b.rangeBias;
   const gap = Math.abs(t.x - a.x);
 
   // --- out of ammo: get down first, feed it second.
@@ -218,17 +221,22 @@ export function updateBrain(a, game, dt) {
       break;
     }
 
-    // No cover worth having: close the distance and fire on the move.
+    // Nothing to hide behind: walk to the distance this weapon wants, get down,
+    // and fight from there. Past a certain range that means lying down -- a man
+    // prone at thirty metres is a very small thing to hit.
     default: {
       const closing = gap > wantRange + AI.rangeSlack;
-      const backing = gap < wantRange - AI.rangeSlack;
-      if (closing || backing) {
-        driveTo(a, t.x - Math.sign(t.x - a.x) * wantRange, closing && gap > wantRange * 1.8);
+      const backing = gap < wantRange - AI.rangeSlack || gap < AI.minGap;
+      const settled = !closing && !backing;
+      if (!settled) {
+        driveTo(a, t.x - Math.sign(t.x - a.x) * wantRange, closing && gap > wantRange * 1.6);
         it.stance = 'stand';
       } else {
-        it.stance = pinned ? 'prone' : 'crouch';
+        it.stance = pinned || gap > AI.goProne ? 'prone' : 'crouch';
       }
-      if (see && !pinned && b.timer <= 0) {
+      // Shots are taken from a stop, which is what makes it a firefight at
+      // distance rather than a jog with the trigger held down.
+      if (see && settled && !pinned && a.change <= 0 && b.timer <= 0) {
         it.fire = b.burst > 0;
         if (a.heat < 0.05) b.burst--;
         if (b.burst <= 0) {

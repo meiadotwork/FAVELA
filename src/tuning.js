@@ -5,8 +5,9 @@
 // converted to pixels exactly once, here. A speed of 4 m/s is a sprint whatever
 // the sheet is scaled to, and a 12 m shotgun range is a length you can pace out.
 
-/** A man is 1.78 m and the art draws him 110 px tall. */
-export const PX_PER_M = 110 / 1.78;
+/** A man is 1.70 m and the art draws him 110 px tall. The door he fights
+ *  around is 2 m, which is the other end of the same ruler. */
+export const PX_PER_M = 110 / 1.70;
 /** Atlas frames are cut at 190 px for that same 1.78 m. */
 export const SPRITE_SCALE = 110 / 190;
 
@@ -22,35 +23,35 @@ export const deg = (d) => (d * Math.PI) / 180;
 export const STANCES = {
   stand: {
     name: 'EM PE',
-    height: 1.78,        // top of the body, for hit tests and cover checks
-    muzzle: 1.42,        // where bullets leave, and where they must clear cover
-    walk: 1.55,          // m/s
-    run: 4.0,
+    height: 1.70,        // top of the body, for hit tests and cover checks
+    muzzle: 1.36,        // where bullets leave, and where they must clear cover
+    walk: 1.35,          // m/s -- this is a gunfight, not a footrace
+    run: 3.3,
     steady: 1.0,         // spread multiplier -- higher is worse
-    stride: 0.75,        // metres of ground per footfall, which paces the gait
-    strideRun: 1.35,
+    stride: 0.72,        // metres of ground per footfall, which paces the gait
+    strideRun: 1.25,
     anim: { idle: 'idle', move: 'walk', run: 'run', fire: 'shoot', moveFire: 'walkAim' },
   },
   crouch: {
     name: 'AGACHADO',
-    height: 1.15,
-    muzzle: 0.95,
-    walk: 0.95,
-    run: 0.95,
+    height: 1.10,
+    muzzle: 0.91,
+    walk: 0.85,
+    run: 0.85,
     steady: 0.62,
-    stride: 0.52,
-    strideRun: 0.52,
+    stride: 0.50,
+    strideRun: 0.50,
     anim: { idle: 'crouch', move: 'crouch', run: 'crouch', fire: 'crouchShoot', moveFire: 'crouchShoot' },
   },
   prone: {
     name: 'DEITADO',
-    height: 0.45,
-    muzzle: 0.30,
-    walk: 0.45,
-    run: 0.45,
+    height: 0.43,
+    muzzle: 0.28,
+    walk: 0.40,
+    run: 0.40,
     steady: 0.38,
-    stride: 0.38,
-    strideRun: 0.38,
+    stride: 0.36,
+    strideRun: 0.36,
     anim: { idle: 'prone', move: 'proneCrawl', run: 'proneCrawl', fire: 'proneShoot', moveFire: 'proneShoot' },
   },
 };
@@ -78,20 +79,20 @@ export const WEAPONS = {
   rifle: {
     name: 'FUZIL',
     auto: true,
-    rpm: 640,
-    damage: 17,
+    rpm: 620,
+    damage: 16,
     pellets: 1,
-    spread: 1.0,          // degrees, at rest, standing
-    bloomShot: 0.60,      // degrees added per shot
-    bloomMax: 5.5,
-    bloomDecay: 7.0,      // degrees shed per second
+    spread: 0.85,         // degrees, at rest, standing
+    bloomShot: 0.55,      // degrees added per shot
+    bloomMax: 5.0,
+    bloomDecay: 6.5,      // degrees shed per second
     mag: 30,
-    reserve: 180,
+    reserve: 300,
     reload: 2.35,
     shellReload: false,
-    speed: 145,           // m/s -- arcade-slow so a tracer reads on screen
-    near: 18,             // full damage out to here
-    far: 45,              // quarter damage here, and nothing beyond
+    speed: 175,           // m/s -- arcade-slow so a tracer reads on screen
+    near: 26,             // full damage out to here
+    far: 65,              // quarter damage here, and nothing beyond
     kick: 0.55,           // camera and muzzle rise
     sound: 'rifle',
   },
@@ -106,12 +107,12 @@ export const WEAPONS = {
     bloomMax: 7.0,
     bloomDecay: 6.0,
     mag: 15,
-    reserve: 96,
+    reserve: 150,
     reload: 1.75,
     shellReload: false,
-    speed: 120,
-    near: 10,
-    far: 26,
+    speed: 130,
+    near: 12,
+    far: 32,
     kick: 0.75,
     sound: 'pistol',
   },
@@ -126,7 +127,7 @@ export const WEAPONS = {
     bloomMax: 0.0,
     bloomDecay: 8.0,
     mag: 6,
-    reserve: 42,
+    reserve: 60,
     reload: 0.52,         // per shell -- see shellReload
     shellReload: true,    // fed one at a time, and interruptible
     speed: 95,
@@ -143,7 +144,7 @@ export const BODY = {
   headTop: 1.00,          // fractions of stance height, measured from the ground
   headBottom: 0.86,
   legTop: 0.42,
-  halfWidth: 0.26,        // m
+  halfWidth: 0.25,        // m
   head: 2.6,              // damage multipliers
   torso: 1.0,
   legs: 0.65,
@@ -173,9 +174,9 @@ export const SUPPRESSION = {
 
 export const AI = {
   damageScale: 0.5,
-  sightRange: 34,         // m
+  sightRange: 48,         // m
   reaction: [0.28, 0.55], // seconds between seeing you and firing
-  aimError: [7.0, 2.2],   // degrees, decaying to the second over settle
+  aimError: [7.5, 2.4],   // degrees, decaying to the second over settle
   aimSettle: 1.6,         // seconds of continuous sight to steady down
   burst: [3, 6],          // rounds
   burstGap: [0.35, 0.9],  // seconds between bursts
@@ -184,9 +185,10 @@ export const AI = {
   coverSearch: 9,         // m of slack past its own range when judging a box
   coverWalk: 45,          // m it will walk to reach one worth having
   retreatAt: 0.22,        // fraction of health that sends it looking for cover
-  desiredRange: { rifle: 15, pistol: 9, shotgun: 5 },
-  rangeSlack: 3,          // m of tolerance before it closes or backs off
-  minGap: 2.5,            // m it will not walk inside of, whatever the cover
+  desiredRange: { rifle: 24, pistol: 14, shotgun: 7 },
+  rangeSlack: 6,          // m of tolerance before it closes or backs off
+  minGap: 6,              // m it will not walk inside of, whatever the cover
+  goProne: 20,            // m past which it fights lying down
   pinnedBreak: 2.6,       // seconds of being held down before it moves house
 };
 
@@ -203,10 +205,14 @@ export const FEEL = {
   cameraLerp: 4.5,
   aimClamp: 22,           // degrees of elevation the sprites can pretend to hold
   bodyPush: 2.6,          // m/s of separation between overlapping actors
+  lean: 1.45,             // m you can put your shoulders past a corner
+  leanOut: 0.26,          // seconds to lean out
+  leanIn: 0.20,           // and to pull back in
+  zooms: [1, 0.72, 0.52], // how far the camera can be pulled back, in steps
 };
 
 export const WORLD = {
-  laneLength: 150,        // m from end to end
+  laneLength: 95,         // m from end to end
   gravity: 18,            // m/s^2, for casings and debris
   bulletLife: 2.5,        // seconds before a round gives up
 };

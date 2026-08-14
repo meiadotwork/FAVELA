@@ -4,11 +4,12 @@
 // held or `reload` was just pressed, and the same question is answered by a
 // keyboard, a mouse, or a thumb on a phone.
 //
-// On touch the left of the screen is an invisible pair of walk zones -- the
-// near half walks left, the far half walks right, and sliding a thumb between
-// them switches direction without lifting it -- while the right of the screen
-// carries the buttons, which are drawn by the HUD from the same table used to
-// hit-test them, so what you press is always what you see.
+// On touch the left of the screen carries a direction ring and the right a row
+// of buttons. Both are drawn by the HUD straight off the tables here, so what
+// you can see is exactly what is being hit-tested. The ring is analog -- how
+// far you push it is how fast you walk, and pushing it to the rim is the run --
+// and the whole left of the screen grabs it, so you never have to look down to
+// find it.
 
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left',
@@ -20,6 +21,7 @@ const KEYMAP = {
   KeyR: 'reload',
   KeyC: 'stance',
   KeyE: 'swap',
+  KeyZ: 'zoom',
   Digit1: 'w1', Digit2: 'w2', Digit3: 'w3',
   KeyP: 'pause', Escape: 'pause',
   KeyM: 'mute',
@@ -27,7 +29,7 @@ const KEYMAP = {
   Enter: 'start', NumpadEnter: 'start',
 };
 
-/** How far across the screen the invisible walk zones reach. */
+/** How far across the screen a finger still counts as reaching for the ring. */
 const WALK_ZONE = 0.42;
 
 export function makeInput(canvas) {
@@ -35,10 +37,14 @@ export function makeInput(canvas) {
   const touched = new Set();   // held by a finger, recomputed every touch event
   const edges = new Set();
   const touches = new Map();   // identifier -> the action that finger is on
+  const points = new Map();    // identifier -> where it is, for the ring
 
   const input = {
     mouse: { x: 0, y: 0, active: false, down: false },
     touch: { active: false },
+    // The direction ring: where it sits, how far it is pushed, where the knob
+    // has ended up. hud.js draws it straight off this.
+    stick: { x: 0, y: 0, r: 96, axis: 0, knob: 0, active: false },
     pads: [],
     down: (a) => keys.has(a) || touched.has(a),
     /** True once per press -- consumed, so two callers cannot both see it. */
@@ -59,7 +65,11 @@ export function makeInput(canvas) {
     const a = KEYMAP[e.code];
     if (a) release(a);
   });
-  addEventListener('blur', () => { keys.clear(); touched.clear(); touches.clear(); edges.clear(); });
+  addEventListener('blur', () => {
+    keys.clear(); touched.clear(); touches.clear(); points.clear(); edges.clear();
+    input.stick.axis = 0;
+    input.stick.active = false;
+  });
 
   // Canvas coordinates, clamped into the picture. A 16:9 canvas on a wider
   // phone leaves black bars down the sides, and a thumb that lands on one is
@@ -100,22 +110,23 @@ export function makeInput(canvas) {
 
   // --- touch.
   //
-  // The buttons live on the right, where a right thumb rests, and every one of
-  // them is transparent: this is a screen you are trying to see through.
+  // A ring on the left for direction and a row of buttons on the right. The
+  // ring is analog: how far you push it is how fast you walk, and pushing it to
+  // the rim is the run, which is why there is no run button.
   const layout = () => {
     const w = canvas.width;
     const h = canvas.height;
-    // One row along the bottom, thumb-height, biggest thing nearest the corner:
-    // the trigger is where the thumb already rests and reload is its neighbour,
-    // because those are the two you reach for under fire.
     const y = h - 96;
     input.pads = [
       { a: 'fire', x: w - 112, y: y - 4, r: 82, label: 'TIRO' },
       { a: 'reload', x: w - 268, y, r: 52, label: 'CARREGA' },
       { a: 'stance', x: w - 388, y, r: 52, label: 'AGACHA' },
       { a: 'swap', x: w - 508, y, r: 52, label: 'ARMA' },
-      { a: 'run', x: w - 628, y, r: 52, label: 'CORRE' },
+      { a: 'zoom', x: w - 628, y, r: 52, label: 'ZOOM' },
     ];
+    input.stick.x = 160;
+    input.stick.y = h - 128;
+    input.stick.r = 96;
   };
   layout();
   input.relayout = layout;
@@ -126,10 +137,24 @@ export function makeInput(canvas) {
   const actionAt = (p) => {
     const pad = padAt(p);
     if (pad) return pad.a;
-    if (p.x < canvas.width * WALK_ZONE) {
-      return p.x < canvas.width * (WALK_ZONE / 2) ? 'left' : 'right';
-    }
+    if (p.x < canvas.width * WALK_ZONE) return 'stick';
     return 'fire';           // anywhere on the open right is also the trigger
+  };
+
+  const readStick = () => {
+    const s = input.stick;
+    let axis = 0;
+    let held = false;
+    for (const [id, action] of touches) {
+      if (action !== 'stick') continue;
+      const p = points.get(id);
+      if (!p) continue;
+      held = true;
+      axis = Math.max(-1, Math.min(1, (p.x - s.x) / s.r));
+    }
+    s.active = held;
+    s.axis = held && Math.abs(axis) > 0.18 ? axis : 0;
+    s.knob = s.x + s.axis * s.r;
   };
 
   const onTouch = (e) => {
@@ -140,10 +165,15 @@ export function makeInput(canvas) {
     for (const t of e.changedTouches) {
       if (e.type === 'touchend' || e.type === 'touchcancel') {
         touches.delete(t.identifier);
+        points.delete(t.identifier);
       } else {
-        // Re-read the action on every move, so sliding from the left zone into
-        // the right one turns you round instead of sticking.
-        touches.set(t.identifier, actionAt(toCanvas(t)));
+        const p = toCanvas(t);
+        points.set(t.identifier, p);
+        // A finger that started on the ring keeps the ring even if it wanders
+        // off it -- that is what makes it a stick rather than a target.
+        if (touches.get(t.identifier) !== 'stick' || e.type === 'touchstart') {
+          touches.set(t.identifier, actionAt(p));
+        }
       }
     }
 
@@ -153,6 +183,7 @@ export function makeInput(canvas) {
     for (const a of now) if (!touched.has(a)) edges.add(a);
     touched.clear();
     for (const a of now) touched.add(a);
+    readStick();
   };
   for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
     document.addEventListener(type, onTouch, { passive: false });
@@ -163,10 +194,16 @@ export function makeInput(canvas) {
 
 /** Left and right as one axis, whichever hand is driving. */
 export function moveAxis(input) {
-  return (input.down('right') ? 1 : 0) - (input.down('left') ? 1 : 0);
+  const keys = (input.down('right') ? 1 : 0) - (input.down('left') ? 1 : 0);
+  return keys || input.stick.axis;
+}
+
+/** Pushing the ring to its rim is the sprint. */
+export function stickRun(input) {
+  return Math.abs(input.stick.axis) > 0.86;
 }
 
 /** Any input at all, for the title and death screens. */
 export function anyPress(input) {
-  return input.hit('start') || input.hit('fire') || input.hit('left') || input.hit('right');
+  return input.hit('start') || input.hit('fire') || input.hit('stick');
 }

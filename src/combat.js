@@ -6,7 +6,7 @@
 
 import { WORLD, SUPPRESSION, BODY } from './tuning.js';
 import { traceCover } from './world.js';
-import { damageActor, zoneAt, hitbox, bodyHeight } from './actor.js';
+import { damageActor, zoneAt, hitbox, bodyHeight, posX } from './actor.js';
 
 // Where to aim on a body, tried in order: centre mass first, then the parts
 // that stick up over cover, then the parts under it. A man peeking over a wall
@@ -20,9 +20,10 @@ const AIM_POINTS = [0.62, 0.74, 0.88, 0.45, 0.28];
  */
 export function aimPoint(arena, from, target) {
   const h = bodyHeight(target);
+  const x = posX(target);
   for (const f of AIM_POINTS) {
     const y = h * f;
-    if (!traceCover(arena, from.x, from.y, target.x, y)) return { x: target.x, y };
+    if (!traceCover(arena, from.x, from.y, x, y)) return { x, y };
   }
   return null;
 }
@@ -67,7 +68,7 @@ function segBox(x0, y0, x1, y1, b) {
 
 /** Distance from a body's centre line to the path of a round, for suppression. */
 function nearMiss(x0, y0, x1, y1, a) {
-  const cx = a.x;
+  const cx = posX(a);
   const cy = hitbox(a).y1 * 0.6;
   const dx = x1 - x0;
   const dy = y1 - y0;

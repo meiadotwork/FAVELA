@@ -39,7 +39,7 @@ export function toggleMute() {
 
 export const isMuted = () => muted;
 
-function burst({ dur = 0.12, freq = 1400, q = 1.1, gain = 0.5, type = 'bandpass', decay = 0.9, pan = 0 }) {
+function burst({ dur = 0.12, freq = 1400, q = 1.1, gain = 0.5, type = 'bandpass', decay = 0.9, pan = 0, at = 0 }) {
   if (!boot() || muted) return;
   const src = ctx.createBufferSource();
   src.buffer = noise;
@@ -51,7 +51,7 @@ function burst({ dur = 0.12, freq = 1400, q = 1.1, gain = 0.5, type = 'bandpass'
   filter.Q.value = q;
 
   const g = ctx.createGain();
-  const t = ctx.currentTime;
+  const t = ctx.currentTime + at;
   g.gain.setValueAtTime(gain, t);
   g.gain.exponentialRampToValueAtTime(0.0008, t + dur * decay);
 
@@ -64,11 +64,11 @@ function burst({ dur = 0.12, freq = 1400, q = 1.1, gain = 0.5, type = 'bandpass'
   src.stop(t + dur + 0.05);
 }
 
-function tone({ f0 = 180, f1 = 60, dur = 0.18, gain = 0.35, type = 'sine' }) {
+function tone({ f0 = 180, f1 = 60, dur = 0.18, gain = 0.35, type = 'sine', at = 0 }) {
   if (!boot() || muted) return;
   const o = ctx.createOscillator();
   const g = ctx.createGain();
-  const t = ctx.currentTime;
+  const t = ctx.currentTime + at;
   o.type = type;
   o.frequency.setValueAtTime(f0, t);
   o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
@@ -112,10 +112,10 @@ const SHOT = {
 
 export function playShot(weapon, pan = 0, distance = 0) {
   const s = SHOT[weapon] || SHOT.rifle;
-  const near = Math.max(0.18, 1 - distance / 34);       // how present it is
+  const near = Math.max(0.18, 1 - distance / 40);       // how present it is
   const far = 1 - near;                                  // how much is echo
 
-  burst({ ...s.crack, gain: s.crack.gain * near, pan, decay: 0.55 });
+  burst({ ...s.crack, gain: s.crack.gain * near, pan, decay: 0.5 });
   tone({ ...s.punch, gain: s.punch.gain * near, type: 'sine' });
   burst({
     ...s.tail,
@@ -124,8 +124,21 @@ export function playShot(weapon, pan = 0, distance = 0) {
     pan,
     decay: 1,
   });
+
+  // The slap coming back off the houses. Concrete a few metres away on three
+  // sides is why gunfire in a lane sounds like this and not like a range: the
+  // report arrives twice more, quieter, darker and slightly late.
+  burst({
+    dur: s.tail.dur * 0.8, freq: s.tail.freq * 0.75, q: 0.5,
+    gain: s.tail.gain * 0.75 * (0.6 + far), pan: -pan * 0.7, at: 0.085, decay: 1,
+  });
+  burst({
+    dur: s.tail.dur * 1.3, freq: s.tail.freq * 0.5, q: 0.4,
+    gain: s.tail.gain * 0.4 * (0.5 + far), pan: pan * 0.4, at: 0.21, decay: 1,
+  });
+
   // The action working: brass and steel, right after the round is gone.
-  if (near > 0.5) burst({ dur: 0.04, freq: 5200, q: 4, gain: s.click * near, pan });
+  if (near > 0.5) burst({ dur: 0.04, freq: 5200, q: 4, gain: s.click * near, pan, at: 0.03 });
 }
 
 /**

@@ -7,6 +7,7 @@
 import {
   STANCES, STANCE_TIME, STANCE_ORDER, WEAPONS, BODY, HEALTH, SUPPRESSION, FEEL, AI, deg,
 } from './tuning.js';
+import { pushOutOfSolids } from './world.js';
 
 let nextId = 1;
 
@@ -47,6 +48,8 @@ export function makeActor(opts) {
     sinceHit: 99,
     suppression: 0,
 
+    lean: 0,                       // 0 behind the corner, 1 shoulders past it
+    leanDir: 1,
     aim: 0,                        // radians, positive is up
     intent: blankIntent(),
     anim: 'idle',
@@ -74,7 +77,17 @@ function blend(a, field) {
 
 export const bodyHeight = (a) => blend(a, 'height');
 export const muzzleY = (a) => blend(a, 'muzzle');
-export const muzzleX = (a) => a.x + a.facing * 0.32;
+
+/**
+ * Where the body actually is, corner lean included.
+ *
+ * Leaning is the only way past a corner in a lane you cannot walk around, so it
+ * has to move the whole man and not just his gun: the hitbox, the muzzle and
+ * the sprite all read this, which is what makes leaning out to shoot cost
+ * exactly what it should.
+ */
+export const posX = (a) => a.x + a.lean * FEEL.lean * a.leanDir;
+export const muzzleX = (a) => posX(a) + a.facing * 0.32;
 export const centre = (a) => bodyHeight(a) * 0.62;
 export const busy = (a) => a.change > 0 || a.hurt > 0 || !a.alive;
 
@@ -208,7 +221,8 @@ export function zoneAt(a, y) {
 
 /** The box a round has to cross to count as a hit. */
 export function hitbox(a) {
-  return { x0: a.x - BODY.halfWidth, x1: a.x + BODY.halfWidth, y0: 0, y1: bodyHeight(a) };
+  const x = posX(a);
+  return { x0: x - BODY.halfWidth, x1: x + BODY.halfWidth, y0: 0, y1: bodyHeight(a) };
 }
 
 function pickAnim(a) {
@@ -255,6 +269,21 @@ export function updateActor(a, dt, game) {
   if (Math.abs(target) < 0.01 && Math.abs(a.vx) < 0.05) a.vx = 0;
   a.x += a.vx * dt;
   a.x = Math.max(1, Math.min(game.arena.length - 1, a.x));
+
+  // Pressing into a corner you cannot walk through leans you out past it
+  // instead. Let go and you come back in. That is the whole peek: the same
+  // stick that walks you also puts your shoulders in the open.
+  const clamped = pushOutOfSolids(game.arena, a.x, BODY.halfWidth);
+  const blocked = clamped !== a.x;
+  a.x = clamped;
+  const pressing = blocked && Math.sign(it.move) === Math.sign(target) && it.move !== 0;
+  if (pressing) {
+    a.leanDir = Math.sign(it.move);
+    a.lean = Math.min(1, a.lean + dt / FEEL.leanOut);
+  } else {
+    a.lean = Math.max(0, a.lean - dt / FEEL.leanIn);
+  }
+
   a.step += Math.abs(a.vx) * dt;
 
   const foot = Math.floor(a.step / strideOf(a));

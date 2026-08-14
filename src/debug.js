@@ -5,10 +5,10 @@
 // player and whether that line is clear. Tuning a cover shooter without being
 // able to see the boxes is guesswork.
 
-import { STANCES, BODY, AI, PX_PER_M } from './tuning.js';
-import { view, sx, sy } from './render.js';
+import { STANCES, BODY, AI } from './tuning.js';
+import { view, sx, sy, pxm } from './render.js';
 import { traceCover } from './world.js';
-import { bodyHeight, muzzleX, muzzleY, hitbox, spreadOf, centre } from './actor.js';
+import { bodyHeight, muzzleX, muzzleY, hitbox, spreadOf, centre, posX } from './actor.js';
 
 function line(ctx, x0, y0, x1, y1, colour, dash = null) {
   ctx.save();
@@ -33,7 +33,7 @@ function drawCoverBoxes(game) {
   const { ctx } = view;
   for (const c of game.arena.covers) {
     const x = sx(c.x0);
-    const w = c.w * PX_PER_M;
+    const w = c.w * pxm();
     const top = sy(c.h);
     ctx.strokeStyle = 'rgba(120,220,255,0.55)';
     ctx.strokeRect(x, top, w, sy(0) - top);
@@ -77,7 +77,7 @@ function drawBody(a) {
   ctx.strokeRect(x0, sy(h), w, sy(0) - sy(h));
 
   // Muzzle height, which is the number cover is measured against.
-  line(ctx, a.x - 0.6, muzzleY(a), a.x + 0.6, muzzleY(a), '#f2c14e');
+  line(ctx, posX(a) - 0.6, muzzleY(a), posX(a) + 0.6, muzzleY(a), '#f2c14e');
 }
 
 function drawSightlines(game) {
@@ -87,14 +87,14 @@ function drawSightlines(game) {
     if (a.player || !a.alive || !p.alive) continue;
     const mx = muzzleX(a);
     const my = muzzleY(a);
-    const hit = traceCover(game.arena, mx, my, p.x, centre(p));
-    line(ctx, mx, my, hit ? hit.x : p.x, hit ? hit.y : centre(p),
+    const hit = traceCover(game.arena, mx, my, posX(p), centre(p));
+    line(ctx, mx, my, hit ? hit.x : posX(p), hit ? hit.y : centre(p),
       hit ? 'rgba(255,90,90,0.5)' : 'rgba(120,255,160,0.65)', hit ? [4, 4] : null);
 
     const b = a.brain;
     if (b) {
       const label = `${b.state}${b.up ? '^' : '_'} ${b.cover ? b.cover.kind : 'aberto'}`;
-      text(ctx, label, sx(a.x) - 22, sy(bodyHeight(a)) - 18, b.seen ? '#ffd08a' : '#8aa0b8');
+      text(ctx, label, sx(posX(a)) - 22, sy(bodyHeight(a)) - 18, b.seen ? '#ffd08a' : '#8aa0b8');
       if (b.cover) {
         line(ctx, b.hidePos, 0, b.hidePos, 0.5, '#5ad0ff');
         line(ctx, b.peekPos, 0, b.peekPos, 0.8, '#ffb45a');
@@ -125,7 +125,7 @@ function drawPanel(game) {
   const { ctx, H } = view;
   const p = game.player;
   const rows = [
-    `x        ${p.x.toFixed(2)} m   v ${p.vx.toFixed(2)} m/s`,
+    `x        ${p.x.toFixed(2)} m   v ${p.vx.toFixed(2)} m/s  lean ${p.lean.toFixed(2)}`,
     `stance   ${p.stance}${p.change > 0 ? ` -> ${p.want} ${(p.change * 1000) | 0}ms` : ''}`,
     `altura   ${bodyHeight(p).toFixed(2)} m   cano ${muzzleY(p).toFixed(2)} m`,
     `arma     ${p.weapon}  ${p.mag}/${p.reserve}  bloom ${p.bloom.toFixed(2)}`,

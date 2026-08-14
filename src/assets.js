@@ -10,6 +10,7 @@ export const assets = {
   manifest: null,
   sheets: {},      // character key -> Image
   buildings: [],   // houses, in manifest order
+  house: null,     // the one house in the play plane, if real art was supplied
   walls: [],       // flat masonry panels, used to texture cover
   cars: [],        // parked vehicles, used as cover
   caveirao: null,  // the police armoured truck
@@ -46,6 +47,14 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
     jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
       .then((img) => { assets.caveirao = img; }));
   }
+  // Optional: real artwork for the house, if the manifest names any. Painted in
+  // props.js when it does not, so adding the entry is the whole of the change.
+  if (manifest.house) {
+    jobs.push(loadImage(`${base}/${manifest.house.file}`)
+      .then((img) => { assets.house = img; })
+      .catch(() => {}));
+  }
+
   if (manifest.civilians) {
     jobs.push(loadImage(`${base}/${manifest.civilians.sheet}`)
       .then((img) => { assets.sheets.civ = img; }));

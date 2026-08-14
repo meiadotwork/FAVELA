@@ -2,12 +2,14 @@
 //
 // The simulation is in metres with the ground at y = 0 and up as positive.
 // Exactly one place converts that to pixels -- sx()/sy() below -- so every
-// sprite, box and particle in the game agrees about where the floor is.
+// sprite, box and particle in the game agrees about where the floor is, and
+// pulling the camera back for a long shot is one number in that conversion.
 
 import { PX_PER_M, SPRITE_SCALE, FEEL } from './tuning.js';
 import { assets, anim, frameAt, drawFrame } from './assets.js';
-import { rng } from './world.js';
-import { bodyHeight, strideOf } from './actor.js';
+import { rng, HOUSE } from './world.js';
+import { paintHouse } from './props.js';
+import { bodyHeight, strideOf, posX } from './actor.js';
 
 export const view = {
   ctx: null,
@@ -15,8 +17,11 @@ export const view = {
   H: 720,
   groundY: 0,        // screen y of the ground line
   cam: { x: 0, target: 0 },
+  zoom: 1,
+  zoomStep: 0,
   dirt: null,
   backdrop: null,
+  house: null,
 };
 
 export function initRender(canvas) {
@@ -25,13 +30,29 @@ export function initRender(canvas) {
   view.H = canvas.height;
   view.groundY = Math.round(view.H * 0.80);
   view.dirt = paintDirt(1024, Math.round(view.H - view.groundY) + 40);
+  view.house = paintHouse(HOUSE);
   return view.ctx;
 }
 
-export const sx = (x) => (x - view.cam.x) * PX_PER_M + view.W / 2;
-export const sy = (y) => view.groundY - y * PX_PER_M;
-export const toWorldX = (px) => view.cam.x + (px - view.W / 2) / PX_PER_M;
-export const toWorldY = (py) => (view.groundY - py) / PX_PER_M;
+/** Pixels to the metre, right now -- the camera's zoom lives in here. */
+export const pxm = () => PX_PER_M * view.zoom;
+/** The scale atlas frames are drawn at, which must track the same zoom. */
+export const sprite = () => SPRITE_SCALE * view.zoom;
+
+export const sx = (x) => (x - view.cam.x) * pxm() + view.W / 2;
+export const sy = (y) => view.groundY - y * pxm();
+export const toWorldX = (px) => view.cam.x + (px - view.W / 2) / pxm();
+export const toWorldY = (py) => (view.groundY - py) / pxm();
+
+/** How many metres of lane the screen currently shows. */
+export const viewWidth = () => view.W / pxm();
+
+export function setZoom(step) {
+  const steps = FEEL.zooms;
+  view.zoomStep = ((step % steps.length) + steps.length) % steps.length;
+  view.zoom = steps[view.zoomStep];
+  return view.zoom;
+}
 
 // --- the ground ----------------------------------------------------------
 //
@@ -54,7 +75,6 @@ function paintDirt(w, h) {
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  // Broad blotches of wetter and drier earth.
   for (let i = 0; i < 260; i++) {
     const x = rand() * w;
     const y = rand() * h;
@@ -70,7 +90,6 @@ function paintDirt(w, h) {
     g.fill();
   }
 
-  // Ruts running down the lane.
   for (let i = 0; i < 22; i++) {
     const y = rand() * h;
     g.strokeStyle = rand() < 0.5 ? 'rgba(52,30,18,0.22)' : 'rgba(196,150,108,0.16)';
@@ -81,7 +100,6 @@ function paintDirt(w, h) {
     g.stroke();
   }
 
-  // Puddles: a dark pool with a bright rim where the light catches the water.
   for (let i = 0; i < 9; i++) {
     const x = rand() * w;
     const y = h * (0.35 + rand() * 0.55);
@@ -97,7 +115,6 @@ function paintDirt(w, h) {
     g.fill();
   }
 
-  // Stones.
   for (let i = 0; i < 900; i++) {
     const x = rand() * w;
     const y = rand() * h;
@@ -111,25 +128,25 @@ function paintDirt(w, h) {
 }
 
 /**
- * The favela behind the lane: three ranks of houses climbing the hill, each
- * moving less than the one in front. `lift` is how far up the slope a rank
- * sits, in metres, which is what turns a row of shacks into a hillside.
+ * The favela behind the lane: two ranks of houses climbing the hill, well back.
+ * The near rank is deliberately empty -- the only building in the play plane is
+ * the one you fight around.
  */
 export function buildBackdrop(arena) {
   const rand = rng(arena.seed * 31 + 5);
   const layers = [
-    { par: 0.20, lift: 7.5, scale: 1.15, tint: 'rgba(24,26,44,0.66)', items: [] },
-    { par: 0.44, lift: 3.4, scale: 1.0, tint: 'rgba(28,26,38,0.42)', items: [] },
-    { par: 0.72, lift: 0.0, scale: 0.86, tint: 'rgba(20,18,26,0.18)', items: [] },
+    { par: 0.16, lift: 8.5, scale: 1.15, tint: 'rgba(24,26,44,0.70)', items: [] },
+    { par: 0.34, lift: 4.0, scale: 0.98, tint: 'rgba(28,26,38,0.46)', items: [] },
+    { par: 0.62, lift: 0.0, scale: 0.8, tint: 'rgba(18,16,24,0.30)', items: [] },
   ];
   const n = assets.buildings.length;
   for (const layer of layers) {
-    let x = -40;
-    while (x < arena.length + 40) {
+    let x = -60;
+    while (x < arena.length + 60) {
       const i = (rand() * n) | 0;
       const b = assets.manifest.buildings[i];
       const w = (b.w * SPRITE_SCALE * layer.scale) / PX_PER_M;
-      layer.items.push({ i, x, w, lift: layer.lift + rand() * 1.6, flip: rand() < 0.4 });
+      layer.items.push({ i, x, w, lift: layer.lift + rand() * 1.8, flip: rand() < 0.4 });
       x += w * (0.6 + rand() * 0.28);
     }
   }
@@ -152,8 +169,8 @@ function drawBackdrop() {
       const b = assets.manifest.buildings[it.i];
       const img = assets.buildings[it.i];
       if (!img) continue;
-      const w = b.w * SPRITE_SCALE * layer.scale;
-      const h = b.h * SPRITE_SCALE * layer.scale;
+      const w = b.w * sprite() * layer.scale;
+      const h = b.h * sprite() * layer.scale;
       const x = sx(it.x + off);
       if (x > W + w || x + w < -w) continue;
       const y = sy(it.lift) - h;
@@ -163,7 +180,6 @@ function drawBackdrop() {
       ctx.drawImage(img, -w / 2, -h / 2, w, h);
       ctx.restore();
     }
-    // One flat wash per rank, which is what puts them behind each other.
     ctx.fillStyle = layer.tint;
     ctx.fillRect(0, 0, W, view.groundY);
   }
@@ -174,15 +190,14 @@ function drawGround() {
   const tile = view.dirt;
   const y = view.groundY - 6;
 
-  // The far side of the lane: a band of shadow at the foot of the houses that
-  // stops the sky showing through the gaps between them at ankle height.
   const base = ctx.createLinearGradient(0, sy(2.4), 0, view.groundY);
   base.addColorStop(0, 'rgba(18,13,16,0)');
-  base.addColorStop(0.45, 'rgba(20,13,13,0.45)');
-  base.addColorStop(1, 'rgba(20,13,12,0.92)');
+  base.addColorStop(0.45, 'rgba(20,13,13,0.4)');
+  base.addColorStop(1, 'rgba(20,13,12,0.88)');
   ctx.fillStyle = base;
   ctx.fillRect(0, sy(2.4), W, view.groundY - sy(2.4) + 2);
-  const offset = ((view.cam.x * PX_PER_M) % tile.width + tile.width) % tile.width;
+
+  const offset = ((view.cam.x * pxm()) % tile.width + tile.width) % tile.width;
   for (let x = -offset; x < W; x += tile.width) {
     ctx.drawImage(tile, Math.round(x), y, tile.width, tile.height);
   }
@@ -194,74 +209,36 @@ function drawGround() {
   ctx.fillRect(0, y, W, H - y);
 }
 
-// --- cover ---------------------------------------------------------------
+// --- the house -----------------------------------------------------------
 
-function drawWall(cover) {
+/**
+ * The one building in the play plane. Real artwork wins if it is in assets;
+ * otherwise the painted one, which is drawn to the same measurements. It is
+ * wider than the box that stops bullets -- the wall is set back and only its
+ * corner stands in the lane -- so it draws from the arena's art rectangle.
+ */
+function drawHouse(arena) {
   const { ctx } = view;
-  const spec = assets.manifest.walls?.[cover.art % (assets.manifest.walls?.length || 1)];
-  const img = assets.walls[cover.art % assets.walls.length];
-  const w = cover.w * PX_PER_M;
-  const h = cover.h * PX_PER_M;
-  const x = sx(cover.x0);
-  const y = sy(cover.h);
-  if (img && spec) {
-    // Show the foot of the masonry, tiled across, so the courses stay square.
-    const srcH = Math.min(spec.h, (h / SPRITE_SCALE));
-    const srcY = spec.h - srcH;
-    const stepW = spec.w * SPRITE_SCALE;
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x, y, w, h);
-    ctx.clip();
-    for (let dx = 0; dx < w + stepW; dx += stepW) {
-      ctx.drawImage(img, 0, srcY, spec.w, srcH, x + dx, y, stepW, h);
-    }
-    ctx.restore();
+  const w = arena.art.w * pxm();
+  const x = sx(arena.art.x0);
+
+  if (assets.house) {
+    const img = assets.house;
+    const h = (img.height / img.width) * w;
+    ctx.drawImage(img, x, sy(0) - h, w, h);
   } else {
-    ctx.fillStyle = '#6a6157';
-    ctx.fillRect(x, y, w, h);
+    const { canvas, metres } = view.house;
+    const h = metres * pxm();
+    ctx.drawImage(canvas, x, sy(0) - h, w, h);
   }
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(x, y, w, 3);
-}
 
-function drawCorner(cover) {
-  const { ctx } = view;
-  const i = cover.art % assets.buildings.length;
-  const img = assets.buildings[i];
-  const spec = assets.manifest.buildings[i];
-  const w = cover.w * PX_PER_M;
-  const h = cover.h * PX_PER_M;
-  const x = sx(cover.x0);
-  const y = sy(cover.h);
-  if (img) {
-    const srcW = Math.min(spec.w, (w / SPRITE_SCALE) * (spec.h / (h / SPRITE_SCALE)));
-    ctx.drawImage(img, 0, 0, srcW, spec.h, x, y, w, h);
-  } else {
-    ctx.fillStyle = '#4c4740';
-    ctx.fillRect(x, y, w, h);
-  }
-}
-
-function drawVehicle(cover) {
-  const { ctx } = view;
-  const isTruck = cover.kind === 'caveirao';
-  const img = isTruck ? assets.caveirao : assets.cars[cover.art % assets.cars.length];
-  const spec = isTruck ? assets.manifest.caveirao : assets.manifest.cars[cover.art % assets.manifest.cars.length];
-  if (!img) return;
-  const w = spec.w * SPRITE_SCALE;
-  const h = spec.h * SPRITE_SCALE;
-  ctx.save();
-  ctx.translate(sx(cover.x), sy(0));
-  if (cover.flip) ctx.scale(-1, 1);
-  ctx.drawImage(img, -w / 2, -h, w, h);
-  ctx.restore();
-}
-
-function drawCover(cover) {
-  if (cover.kind === 'wall') drawWall(cover);
-  else if (cover.kind === 'corner') drawCorner(cover);
-  else drawVehicle(cover);
+  // The lee of the corner, which is the thing the player is actually using.
+  const c = arena.corner;
+  const shade = ctx.createLinearGradient(sx(c.x0 - 3.5), 0, sx(c.x0), 0);
+  shade.addColorStop(0, 'rgba(0,0,0,0)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.35)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(sx(c.x0 - 3.5), sy(c.h), 3.5 * pxm(), c.h * pxm());
 }
 
 // --- actors --------------------------------------------------------------
@@ -271,8 +248,7 @@ function drawCover(cover) {
  *
  * Walking, running and crawling are counted off the ground covered, not off a
  * clock: one cycle of the animation is two footfalls, so however fast the legs
- * are carrying him the feet land where they are planted. Everything else --
- * firing, flinching, dying -- runs on time, because none of it is a gait.
+ * are carrying him the feet land where they are planted.
  */
 function frameIndex(a, n) {
   const moving = Math.abs(a.vx) > 0.15;
@@ -290,12 +266,12 @@ function frameIndex(a, n) {
 
 function drawShadow(a) {
   const { ctx } = view;
-  const w = (a.stance === 'prone' ? 1.5 : 0.75) * PX_PER_M * 0.6;
+  const w = (a.stance === 'prone' ? 1.4 : 0.7) * pxm() * 0.6;
   ctx.save();
   ctx.globalAlpha = 0.38;
   ctx.fillStyle = '#150d09';
   ctx.beginPath();
-  ctx.ellipse(sx(a.x), sy(0) + 2, w, 7, 0, 0, 6.283);
+  ctx.ellipse(sx(posX(a)), sy(0) + 2, w, 7 * view.zoom, 0, 0, 6.283);
   ctx.fill();
   ctx.restore();
 }
@@ -305,22 +281,19 @@ export function drawActor(a) {
   drawShadow(a);
   const dead = !a.alive;
 
-  // Loops wrap; a death animation plays once and stays down.
   const frames = anim(a.key, a.anim);
   const i = frameIndex(a, frames.length);
-  const f = dead
-    ? frames[Math.min(frames.length - 1, i)]
-    : frameAt(a.key, a.anim, i);
+  const f = dead ? frames[Math.min(frames.length - 1, i)] : frameAt(a.key, a.anim, i);
 
   const alpha = dead ? Math.max(0.25, 1 - Math.max(0, a.dying - 6) * 0.5) : 1;
-  drawFrame(ctx, a.key, f, sx(a.x), sy(0), a.facing, SPRITE_SCALE, alpha);
+  drawFrame(ctx, a.key, f, sx(posX(a)), sy(0), a.facing, sprite(), alpha);
 
   if (!dead && a.hurt > 0) {
     ctx.save();
     ctx.globalAlpha = Math.min(0.5, a.hurt * 2.4);
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = '#7a1010';
-    ctx.fillRect(sx(a.x) - 26, sy(bodyHeight(a)), 52, bodyHeight(a) * PX_PER_M);
+    ctx.fillRect(sx(posX(a)) - 26 * view.zoom, sy(bodyHeight(a)), 52 * view.zoom, bodyHeight(a) * pxm());
     ctx.restore();
   }
 
@@ -329,9 +302,9 @@ export function drawActor(a) {
 
 function drawEnemyTag(a) {
   const { ctx } = view;
-  const x = sx(a.x);
+  const x = sx(posX(a));
   const y = sy(bodyHeight(a)) - 12;
-  const w = 34;
+  const w = 34 * Math.max(0.7, view.zoom);
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(x - w / 2, y, w, 4);
   ctx.fillStyle = a.team === 'police' ? '#5aa9e6' : '#e05a4a';
@@ -347,7 +320,7 @@ export function drawFx(fx, bullets) {
   for (const d of fx.decals) {
     ctx.fillStyle = d.colour;
     ctx.beginPath();
-    ctx.ellipse(sx(d.x), sy(d.y), d.w * PX_PER_M, d.h * PX_PER_M * 0.4, 0, 0, 6.283);
+    ctx.ellipse(sx(d.x), sy(d.y), d.w * pxm(), d.h * pxm() * 0.4, 0, 0, 6.283);
     ctx.fill();
   }
   ctx.restore();
@@ -357,17 +330,16 @@ export function drawFx(fx, bullets) {
     ctx.translate(sx(c.x), sy(c.y));
     ctx.rotate(c.ang);
     ctx.fillStyle = '#d8b25a';
-    ctx.fillRect(-3, -1.2, 6, 2.4);
+    ctx.fillRect(-3 * view.zoom, -1.2 * view.zoom, 6 * view.zoom, 2.4 * view.zoom);
     ctx.restore();
   }
 
-  // Tracers: a short bright streak along the round's own path.
   ctx.save();
   ctx.lineCap = 'round';
   for (const b of bullets) {
-    const tail = b.weapon === 'shotgun' ? 0.5 : 1.3;
+    const tail = b.weapon === 'shotgun' ? 0.5 : 1.6;
     ctx.strokeStyle = b.team === 'player' ? 'rgba(255,226,150,0.92)' : 'rgba(255,168,120,0.85)';
-    ctx.lineWidth = b.weapon === 'shotgun' ? 1.4 : 2;
+    ctx.lineWidth = (b.weapon === 'shotgun' ? 1.4 : 2) * Math.max(0.6, view.zoom);
     ctx.beginPath();
     ctx.moveTo(sx(b.x), sy(b.y));
     ctx.lineTo(sx(b.x - b.dx * tail), sy(b.y - b.dy * tail));
@@ -381,8 +353,8 @@ export function drawFx(fx, bullets) {
     const k = 1 - mk.t / mk.life;
     if (!img) continue;
     const spec = assets.manifest.fx[mk.material][mk.i % list.length];
-    const w = spec.w * SPRITE_SCALE;
-    const h = spec.h * SPRITE_SCALE;
+    const w = spec.w * sprite();
+    const h = spec.h * sprite();
     ctx.save();
     ctx.globalAlpha = Math.max(0, k);
     ctx.drawImage(img, sx(mk.x) - w / 2, sy(mk.y) - h / 2, w, h);
@@ -393,14 +365,14 @@ export function drawFx(fx, bullets) {
     const k = 1 - p.t / p.life;
     ctx.globalAlpha = Math.max(0, k);
     ctx.fillStyle = p.hot ? '#ffd68a' : p.colour;
-    const s = p.size * PX_PER_M;
+    const s = p.size * pxm();
     ctx.fillRect(sx(p.x) - s / 2, sy(p.y) - s / 2, s, s);
   }
   ctx.globalAlpha = 1;
 
   for (const f of fx.flashes) {
     const k = 1 - f.t / f.life;
-    const r = (0.28 + f.size * 0.18) * PX_PER_M * (0.7 + k * 0.5);
+    const r = (0.28 + f.size * 0.18) * pxm() * (0.7 + k * 0.5);
     const x = sx(f.x);
     const y = sy(f.y);
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
@@ -418,13 +390,15 @@ export function drawFx(fx, bullets) {
 
 export function updateCamera(game, dt) {
   const p = game.player;
-  const lead = p.aimTarget ? Math.sign(p.aimTarget.x - p.x) : p.facing;
-  const want = p.x + lead * FEEL.cameraLead * (p.intent.fire ? 1 : 0.55);
+  // The crew only ever comes from one end, so the camera leans that way: you
+  // are looking down the lane you are shooting down.
+  const lead = p.aimTarget ? Math.sign(p.aimTarget.x - p.x) || game.arena.threat : game.arena.threat;
+  const want = p.x + lead * FEEL.cameraLead * (p.intent.fire ? 1.3 : 0.8);
   const cam = view.cam;
-  const half = view.W / (2 * PX_PER_M);
-  const clampLo = half - 4;
-  const clampHi = game.arena.length - half + 4;
-  cam.target = Math.max(clampLo, Math.min(clampHi, want));
+  const half = viewWidth() / 2;
+  const lo = half - 6;
+  const hi = game.arena.length - half + 6;
+  cam.target = Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), want));
   if (Math.abs(cam.target - cam.x) > FEEL.cameraDead) {
     cam.x += (cam.target - cam.x) * Math.min(1, FEEL.cameraLerp * dt);
   }
@@ -443,15 +417,12 @@ export function renderFrame(game) {
   drawBackdrop();
   drawGround();
 
-  const back = game.arena.covers.filter((c) => !c.front);
-  const front = game.arena.covers.filter((c) => c.front);
-  back.forEach(drawCover);
+  drawHouse(game.arena);
 
   const order = game.actors.slice().sort((a, b) => (a.alive === b.alive ? a.x - b.x : (a.alive ? 1 : -1)));
   for (const a of order) drawActor(a);
 
   drawFx(game.fx, game.bullets);
-  front.forEach(drawCover);
 
   ctx.restore();
 }

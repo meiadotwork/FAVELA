@@ -5,8 +5,8 @@
 // hard you are being suppressed. If a number is on screen it is a number the
 // simulation reads.
 
-import { WEAPONS, STANCES, SUPPRESSION, PX_PER_M } from './tuning.js';
-import { view, sx, sy } from './render.js';
+import { WEAPONS, STANCES, SUPPRESSION } from './tuning.js';
+import { view, sx, sy, pxm } from './render.js';
 import { spreadOf, muzzleX, muzzleY } from './actor.js';
 
 const GOLD = '#f2c14e';
@@ -38,7 +38,7 @@ function crosshair(game) {
 
   const dist = Math.hypot(target.x - muzzleX(p), target.y - muzzleY(p));
   const spread = (spreadOf(p) * Math.PI) / 180;
-  const gap = Math.max(5, Math.tan(spread) * dist * PX_PER_M);
+  const gap = Math.max(5, Math.tan(spread) * dist * pxm());
   const x = sx(target.x);
   const y = sy(target.y);
 
@@ -173,12 +173,62 @@ function overlays(game) {
 
 // --- the touch controls --------------------------------------------------
 //
-// Drawn from the same table input.js hit-tests, so the button you can see is
-// exactly the button you are pressing. They stay transparent: this is a screen
-// you are trying to look through, and the left of it carries no furniture at
-// all -- walking is two invisible zones under your other thumb.
+// Drawn from the same tables input.js hit-tests, so the control you can see is
+// exactly the control you are pressing: a direction ring on the left, a row of
+// buttons on the right, all of them dark glass with a bright rim so they read
+// over dirt and over a lit wall without hiding the lane behind them.
 
 const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+
+/** The direction ring: a track, a knob, and the two ends marked. */
+function stickRing(game) {
+  const { ctx } = view;
+  const s = game.input.stick;
+  const knobX = s.active ? s.knob : s.x;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, s.r, 0, 6.283);
+  ctx.fillStyle = 'rgba(12,10,12,0.34)';
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = s.active ? 'rgba(255,214,120,0.8)' : 'rgba(240,238,230,0.55)';
+  ctx.stroke();
+
+  // The axis it actually reads: left and right, and nothing else.
+  ctx.strokeStyle = 'rgba(240,238,230,0.3)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(s.x - s.r * 0.66, s.y);
+  ctx.lineTo(s.x + s.r * 0.66, s.y);
+  ctx.stroke();
+  for (const dir of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(s.x + dir * (s.r * 0.66), s.y);
+    ctx.lineTo(s.x + dir * (s.r * 0.5), s.y - 10);
+    ctx.lineTo(s.x + dir * (s.r * 0.5), s.y + 10);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(240,238,230,0.35)';
+    ctx.fill();
+  }
+
+  ctx.beginPath();
+  ctx.arc(knobX, s.y, 38, 0, 6.283);
+  ctx.fillStyle = s.active ? 'rgba(242,193,78,0.5)' : 'rgba(240,238,230,0.22)';
+  ctx.fill();
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = s.active ? 'rgba(255,224,150,0.95)' : 'rgba(240,238,230,0.6)';
+  ctx.stroke();
+
+  // At the rim it is a sprint, so say so at the rim.
+  if (Math.abs(s.axis) > 0.86) {
+    ctx.font = '11px "Trebuchet MS", system-ui, sans-serif';
+    ctx.fillStyle = GOLD;
+    ctx.textAlign = 'center';
+    ctx.fillText('CORRE', s.x, s.y - s.r - 10);
+  }
+  ctx.restore();
+}
 
 function touchPads(game) {
   const { ctx } = view;
@@ -186,8 +236,10 @@ function touchPads(game) {
   if (!input || !(input.touch.active || coarse)) return;
   const p = game.player;
 
+  stickRing(game);
+
   for (const pad of input.pads) {
-    const lit = input.down(pad.a) || (pad.a === 'run' && game.runLock);
+    const lit = input.down(pad.a);
     ctx.save();
     ctx.beginPath();
     ctx.arc(pad.x, pad.y, pad.r, 0, 6.283);
@@ -201,7 +253,9 @@ function touchPads(game) {
 
     // The weapon button says which weapon, since that is the question you ask
     // of it -- the others say what they do.
-    const text = pad.a === 'swap' ? WEAPONS[p.weapon].name : pad.label;
+    const text = pad.a === 'swap' ? WEAPONS[p.weapon].name
+      : pad.a === 'zoom' ? `${view.zoom.toFixed(2).replace(/0$/, '')}x`
+        : pad.label;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `${pad.r > 60 ? 16 : 12}px "Trebuchet MS", system-ui, sans-serif`;
@@ -243,10 +297,10 @@ const KEYS = [
 ];
 
 const THUMBS = [
-  ['ESQUERDA DA TELA', 'andar - metade esquerda vai pra esquerda,'],
-  ['', 'metade direita vai pra direita'],
-  ['BOTOES', 'tiro, agacha, carrega, arma, corre'],
-  ['CORRE', 'fica ligado ate desligar'],
+  ['ANEL', 'andar - quanto mais longe, mais rapido'],
+  ['ANEL NA BORDA', 'correr'],
+  ['BOTOES', 'tiro, carrega, agacha, arma, zoom'],
+  ['ZOOM', 'afasta a camera pro tiroteio longe'],
 ];
 
 export function drawTitle(game) {

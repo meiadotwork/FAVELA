@@ -22,7 +22,6 @@ export function rng(seed) {
   };
 }
 
-export const pick = (rand, list) => list[Math.min(list.length - 1, (rand() * list.length) | 0)];
 export const range = (rand, [lo, hi]) => lo + rand() * (hi - lo);
 
 /**
@@ -40,68 +39,61 @@ function box(kind, x, w, h, opts = {}) {
     front: opts.front !== false,   // drawn over the actors
     art: opts.art ?? 0,
     flip: opts.flip || false,
+    mine: !!opts.mine,             // cover reserved for the player
+    solid: !!opts.solid,           // a body cannot walk through it either
   };
 }
 
+/** The house, in metres. The door is 2 m and everything else is measured off it. */
+export const HOUSE = {
+  w: 5.6,          // wall to wall, as drawn
+  h: 2.9,          // ground to the top of the roof slab
+  door: 2.0,       // the ruler the rest of the art is drawn against
+  tank: 0.8,       // the water tank standing on the roof
+  jut: 0.9,        // how much of it actually stands in the lane
+};
+
 /**
- * Lay out an alley: a run of cover with clear ground between the pieces, walls
- * to crouch behind, cars to shoot the windows out of, and one armoured truck
- * that nothing goes through.
+ * One house on an empty lane.
+ *
+ * There is nothing else to hide behind, which is the point: the house is a
+ * solid block at full height that no stance shoots over, so the fight is about
+ * its two corners. The crew comes from one end only, which makes the far corner
+ * -- the one facing away from them -- the safe side, and stepping past the near
+ * one the price of taking a shot.
  */
 export function buildArena(seed = 7) {
-  const rand = rng(seed);
-  const covers = [];
   const len = WORLD.laneLength;
+  const houseX = len * 0.28;                    // centre of the drawn building
+  const cornerX = houseX + HOUSE.w / 2;         // where its wall meets the lane
 
-  let x = 12;
-  let last = '';
-  while (x < len - 12) {
-    let kind = pick(rand, ['wall', 'wall', 'wall', 'car', 'car', 'corner', 'gap']);
-    if (kind === last) kind = 'gap';
-    last = kind;
+  // The building itself is set back and drawn behind the actors, who walk along
+  // its face. What is actually in the lane is the corner, jutting out: a narrow
+  // full-height block that stops everything and that nobody walks through. Cover
+  // in one dimension has to be the corner, not the whole house, or standing
+  // behind the wall would mean standing five metres from the edge you need to
+  // shoot past.
+  const corner = box('corner', cornerX - HOUSE.jut / 2, HOUSE.jut, HOUSE.h, {
+    material: 'concrete',
+    front: false,
+    mine: true,             // the player's corner; the crew does not get to use it
+    solid: true,
+  });
 
-    if (kind === 'wall') {
-      const w = range(rand, [3.2, 7.5]);
-      const h = range(rand, [0.9, 1.35]);
-      covers.push(box('wall', x + w / 2, w, h, {
-        material: 'concrete', art: (rand() * 10) | 0, flip: rand() < 0.5,
-      }));
-      x += w + range(rand, [3.5, 7]);
-    } else if (kind === 'car') {
-      const w = range(rand, [4.0, 4.6]);
-      const h = 1.45;
-      covers.push(box('car', x + w / 2, w, h, {
-        material: 'metal',
-        glass: [h * 0.58, h],       // bodywork to the sill, windows above it
-        art: (rand() * 6) | 0, flip: rand() < 0.5,
-      }));
-      x += w + range(rand, [4, 8]);
-    } else if (kind === 'corner') {
-      // A house corner juts into the lane at full height: step out to shoot,
-      // step back to be safe. Nothing clears it, at any stance.
-      const w = range(rand, [1.6, 2.6]);
-      covers.push(box('corner', x + w / 2, w, range(rand, [3.4, 4.6]), {
-        material: 'concrete', art: (rand() * 10) | 0, front: rand() < 0.6,
-      }));
-      x += w + range(rand, [5, 9]);
-    } else {
-      x += range(rand, [7, 13]);    // open ground, and nowhere to hide on it
-    }
-  }
-
-  // The caveirao sits a third of the way down: armoured throughout, no glass
-  // band, the one piece of cover in the alley that nothing shoots through.
-  const truckX = len * 0.36;
-  covers.forEach((c, i) => { if (Math.abs(c.x - truckX) < 7) covers[i] = null; });
-  const truck = box('caveirao', truckX, 5.9, 2.16, { material: 'metal', front: true });
-  const arena = {
+  return {
     length: len,
-    covers: covers.filter(Boolean).concat([truck]),
-    spawn: { left: 6, right: len - 6, player: len * 0.5 },
+    covers: [corner],
+    // Where the artwork goes, which is wider than the thing that stops bullets.
+    art: { x0: cornerX - HOUSE.w, w: HOUSE.w },
+    corner,
+    // Everything arrives from up the lane, so one side of the corner is safe.
+    threat: 1,                                  // the direction they come from
+    spawn: {
+      enemy: [cornerX + 34, cornerX + 58],      // where they come on from
+      player: cornerX - HOUSE.jut - 2.2,        // in the lee of the corner
+    },
     seed,
   };
-  arena.covers.sort((a, b) => a.x0 - b.x0);
-  return arena;
 }
 
 /** Solid height of a box at a given point: the glass band is a hole in it. */
@@ -178,6 +170,25 @@ export function losClear(arena, x0, y0, x1, y1) {
 export function coverSlot(cover, fromX) {
   const side = fromX < cover.x ? -1 : 1;
   return cover.x + side * (cover.w / 2 + 0.35);
+}
+
+/**
+ * Push a body out of anything solid.
+ *
+ * Low cover is walked past, which is why boxes do not block movement in
+ * general -- but a house is a house. Being able to stand inside its footprint
+ * made the corner a free kill: the wall hid the body from every shot while the
+ * muzzle, half a metre in front of it, was already round the edge and firing.
+ */
+export function pushOutOfSolids(arena, x, halfWidth) {
+  for (const c of arena.covers) {
+    if (!c.solid) continue;
+    if (x + halfWidth <= c.x0 || x - halfWidth >= c.x1) continue;
+    const left = c.x0 - halfWidth;
+    const right = c.x1 + halfWidth;
+    return Math.abs(x - left) < Math.abs(x - right) ? left : right;
+  }
+  return x;
 }
 
 /** The lowest stance whose muzzle clears a box, given where you stand. */
