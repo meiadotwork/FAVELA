@@ -1,45 +1,49 @@
-// All sound is synthesised. The art drop shipped no audio, and a favela
-// firefight is mostly noise bursts and sirens, which WebAudio makes cheaply
-// and lets us retune per weapon without shipping a byte.
+// Gunfire, synthesised.
+//
+// The art drop came with no audio, and a firefight is mostly noise bursts: a
+// crack of filtered white noise for the shot, a body-less thump for the report
+// rolling down the alley, and short clicks for everything mechanical.
 
 let ctx = null;
 let master = null;
+let noise = null;
 let muted = false;
 
-export function initAudio() {
+function boot() {
   if (ctx) return ctx;
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
   ctx = new AC();
   master = ctx.createGain();
-  master.gain.value = 0.5;
+  master.gain.value = 0.55;
   master.connect(ctx.destination);
+
+  // One second of noise, reused for every shot -- cheaper than making it again
+  // sixteen times a second under automatic fire.
+  noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const d = noise.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
   return ctx;
 }
 
 export function resumeAudio() {
+  boot();
   if (ctx && ctx.state === 'suspended') ctx.resume();
 }
 
 export function toggleMute() {
   muted = !muted;
-  if (master) master.gain.value = muted ? 0 : 0.5;
+  if (master) master.gain.value = muted ? 0 : 0.55;
   return muted;
 }
 
 export const isMuted = () => muted;
 
-/** A short burst of filtered white noise: the body of every gunshot and impact. */
-function noise(duration, { type = 'lowpass', freq = 1800, q = 1, gain = 0.5, decay = 1 } = {}) {
-  if (!ctx) return;
-  const frames = Math.max(1, Math.floor(ctx.sampleRate * duration));
-  const buffer = ctx.createBuffer(1, frames, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < frames; i++) {
-    data[i] = (Math.random() * 2 - 1) * (1 - i / frames) ** decay;
-  }
+function burst({ dur = 0.12, freq = 1400, q = 1.1, gain = 0.5, type = 'bandpass', decay = 0.9, pan = 0 }) {
+  if (!boot() || muted) return;
   const src = ctx.createBufferSource();
-  src.buffer = buffer;
+  src.buffer = noise;
+  src.playbackRate.value = 0.8 + Math.random() * 0.4;
 
   const filter = ctx.createBiquadFilter();
   filter.type = type;
@@ -47,83 +51,65 @@ function noise(duration, { type = 'lowpass', freq = 1800, q = 1, gain = 0.5, dec
   filter.Q.value = q;
 
   const g = ctx.createGain();
-  g.gain.value = gain;
+  const t = ctx.currentTime;
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0008, t + dur * decay);
 
-  src.connect(filter).connect(g).connect(master);
-  src.start();
-  src.stop(ctx.currentTime + duration);
+  const p = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+  if (p) p.pan.value = Math.max(-1, Math.min(1, pan));
+
+  src.connect(filter).connect(g);
+  (p ? g.connect(p).connect(master) : g.connect(master));
+  src.start(t);
+  src.stop(t + dur + 0.05);
 }
 
-function tone(freq, duration, { type = 'sine', gain = 0.25, sweepTo = null } = {}) {
-  if (!ctx) return;
-  const osc = ctx.createOscillator();
-  osc.type = type;
-  const now = ctx.currentTime;
-  osc.frequency.setValueAtTime(freq, now);
-  if (sweepTo) osc.frequency.exponentialRampToValueAtTime(sweepTo, now + duration);
-
+function tone({ f0 = 180, f1 = 60, dur = 0.18, gain = 0.35, type = 'sine' }) {
+  if (!boot() || muted) return;
+  const o = ctx.createOscillator();
   const g = ctx.createGain();
-  g.gain.setValueAtTime(gain, now);
-  g.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-  osc.connect(g).connect(master);
-  osc.start(now);
-  osc.stop(now + duration);
+  const t = ctx.currentTime;
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + dur);
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  o.connect(g).connect(master);
+  o.start(t);
+  o.stop(t + dur + 0.02);
 }
 
-/** Distance fades a sound and dulls it, so far-off fire sits behind the player's. */
-function distanceMix(dist) {
-  const near = Math.max(0, 1 - dist / 1400);
-  return { gain: 0.12 + near * 0.55, freq: 900 + near * 2600 };
+const SHOT = {
+  rifle: { dur: 0.13, freq: 1750, gain: 0.45, thump: 120 },
+  pistol: { dur: 0.15, freq: 1250, gain: 0.5, thump: 105 },
+  shotgun: { dur: 0.32, freq: 780, gain: 0.62, thump: 74 },
+};
+
+export function playShot(weapon, pan = 0, distance = 0) {
+  const s = SHOT[weapon] || SHOT.rifle;
+  const far = Math.max(0.25, 1 - distance / 40);
+  burst({ dur: s.dur, freq: s.freq * (0.6 + far * 0.4), q: 0.8, gain: s.gain * far, pan });
+  tone({ f0: s.thump, f1: 40, dur: 0.16, gain: 0.3 * far });
+  if (distance > 12) burst({ dur: 0.5, freq: 320, q: 0.4, gain: 0.12 * far, pan, decay: 1 });
 }
 
-export function sfxShot(weapon = 'rifle', dist = 0) {
-  const { gain, freq } = distanceMix(dist);
-  if (weapon === 'pistol') {
-    noise(0.09, { freq: freq * 0.9, gain: gain * 0.75, q: 1.5, decay: 2 });
-    tone(180, 0.07, { type: 'square', gain: gain * 0.12, sweepTo: 60 });
-  } else {
-    noise(0.14, { freq, gain, q: 1.2, decay: 1.6 });
-    tone(120, 0.11, { type: 'triangle', gain: gain * 0.18, sweepTo: 45 });
-  }
+export function playImpact(material, pan = 0) {
+  const map = {
+    concrete: { freq: 2400, dur: 0.09, gain: 0.22 },
+    metal: { freq: 3600, dur: 0.13, gain: 0.26 },
+    dirt: { freq: 900, dur: 0.08, gain: 0.16 },
+    flesh: { freq: 420, dur: 0.09, gain: 0.3 },
+  };
+  const s = map[material] || map.dirt;
+  burst({ ...s, q: material === 'metal' ? 5 : 1.2, pan });
 }
 
-export function sfxImpact(dist = 0) {
-  const { gain } = distanceMix(dist);
-  noise(0.06, { type: 'highpass', freq: 2200, gain: gain * 0.5, decay: 3 });
+export function playDry() { burst({ dur: 0.04, freq: 2600, q: 6, gain: 0.25 }); }
+export function playClick() { burst({ dur: 0.05, freq: 1800, q: 4, gain: 0.2 }); }
+export function playReloadDone() { burst({ dur: 0.07, freq: 900, q: 3, gain: 0.28 }); }
+export function playHurt() { tone({ f0: 260, f1: 70, dur: 0.3, gain: 0.35, type: 'triangle' }); }
+export function playKill() {
+  burst({ dur: 0.22, freq: 520, q: 0.7, gain: 0.3 });
+  tone({ f0: 90, f1: 35, dur: 0.3, gain: 0.3 });
 }
-
-export function sfxHit() {
-  noise(0.18, { freq: 700, gain: 0.5, decay: 1.2 });
-  tone(90, 0.16, { type: 'sine', gain: 0.3, sweepTo: 40 });
-}
-
-export function sfxDeath() {
-  noise(0.4, { freq: 420, gain: 0.4, decay: 0.8 });
-  tone(70, 0.5, { type: 'sine', gain: 0.25, sweepTo: 30 });
-}
-
-/** The three pops that warn the hill the police are coming in. */
-export function sfxFirework() {
-  noise(0.05, { type: 'highpass', freq: 1200, gain: 0.55, decay: 4 });
-  tone(2200, 0.12, { type: 'square', gain: 0.05, sweepTo: 400 });
-}
-
-/** Two-tone wail, repeated `wails` times from the given moment. */
-export function sfxSiren(wails = 3) {
-  if (!ctx) return;
-  for (let i = 0; i < wails; i++) {
-    const at = i * 0.62;
-    setTimeout(() => tone(720, 0.3, { type: 'sawtooth', gain: 0.07, sweepTo: 980 }), at * 1000);
-    setTimeout(() => tone(980, 0.3, { type: 'sawtooth', gain: 0.07, sweepTo: 720 }), (at + 0.31) * 1000);
-  }
-}
-
-export function sfxUI(up = true) {
-  tone(up ? 660 : 440, 0.06, { type: 'square', gain: 0.1 });
-}
-
-export function sfxReload() {
-  noise(0.05, { type: 'bandpass', freq: 3000, q: 3, gain: 0.3, decay: 2 });
-  setTimeout(() => noise(0.06, { type: 'bandpass', freq: 1800, q: 3, gain: 0.35, decay: 2 }), 110);
-}
+export function playUi(up = true) { tone({ f0: up ? 420 : 300, f1: up ? 620 : 180, dur: 0.1, gain: 0.2, type: 'square' }); }

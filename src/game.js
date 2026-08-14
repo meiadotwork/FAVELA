@@ -1,544 +1,334 @@
-// FAVELA -- boot, screens, and the run of play.
+// The loop, the screens, and the hand that fills in the player's intent.
 //
-// Screen flow: title -> pick a character -> a level card (police levels open
-// with the firework code) -> waves in the lane -> next level, or the game over
-// card. The world object is rebuilt per level and handed to the systems in
-// actors.js and render.js; nothing survives a level but the player's choice.
+// The simulation runs on a fixed step so the mechanics behave the same on any
+// machine: cover, spread, reload times and stance transitions are all measured
+// in seconds, and a slow frame draws late rather than stepping further.
 
-import { loadAssets, assets, charSpec, anim, drawFrame } from './assets.js';
-import { initInput, input, endFrame, consume, touchState } from './input.js';
-import { initAudio, resumeAudio, toggleMute, sfxFirework, sfxSiren, sfxUI } from './audio.js';
-import { buildLevel, LEVELS, TIMES, WEATHER } from './level.js';
+import { loadAssets } from './assets.js';
+import { STANCE_ORDER, FEEL, HEALTH, WEAPONS } from './tuning.js';
+import { buildArena, rng, range } from './world.js';
 import {
-  makeActor, updatePlayer, updateEnemy, updateBullets, updateParticles, WEAPONS,
-} from './actors.js';
-import { drawWorld, drawHud, drawMinimap, W, H } from './render.js';
-import { spawnCivilians, updateCivilians } from './civilians.js';
+  makeActor, updateActor, separate, setStance, cycleStance,
+  centre, muzzleY, weaponOf, startReload,
+} from './actor.js';
+import { makeBrain, updateBrain } from './ai.js';
+import { makeBullet, stepBullets, aimPoint } from './combat.js';
+import { makeFx, updateFx, flash, casing, mark, blood, shake, hitstop, kickFor } from './fx.js';
+import { makeInput, moveAxis } from './input.js';
+import {
+  initRender, buildBackdrop, renderFrame, updateCamera, view, toWorldX, toWorldY,
+} from './render.js';
+import { drawHud, drawTitle, drawPause, drawDead } from './hud.js';
+import { drawDebug } from './debug.js';
+import {
+  resumeAudio, toggleMute, playShot, playImpact, playDry, playReloadDone,
+  playHurt, playKill, playUi,
+} from './audio.js';
 
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d', { alpha: false });
-ctx.imageSmoothingQuality = 'high';
+const STEP = 1 / 60;
+const rand = rng(0xc0ffee);
 
-const PLAYABLE = ['p1', 'p2', 'p3', 'p4'];
+const ENEMY_KINDS = [
+  { key: 'capuz', weapon: 'pistol', team: 'gang', hp: 80 },
+  { key: 'pano', weapon: 'shotgun', team: 'gang', hp: 95 },
+  { key: 'po', weapon: 'rifle', team: 'police', hp: 110 },
+];
 
 const game = {
-  screen: 'boot',
-  pick: 0,
-  levelIndex: 0,
-  world: null,
-  time: 0,
-  transition: 0,
-  intro: null,
-  paused: false,
+  screen: 'title',
+  arena: null,
+  actors: [],
+  bullets: [],
+  player: null,
+  fx: makeFx(),
+  wave: 0,
+  kills: 0,
+  waveTimer: 0,
+  flash: 0,
+  hitmark: 0,
+  hitmarkAt: null,
+  hitmarkKill: false,
+  banner: '',
+  bannerT: 0,
+  debug: false,
+  lastDt: STEP,
+  input: null,
 };
 
-// Exposed so the headless driver in tools/ can step through screens.
-window.__game = game;
+// --- what the simulation calls back into ---------------------------------
 
-// ------------------------------------------------------------------ world
+game.spawnBullet = (o) => { game.bullets.push(makeBullet(o)); };
 
-function startLevel(levelIndex, playerKey) {
-  const level = buildLevel(levelIndex, playerKey);
-  const spec = charSpec(playerKey);
-  const player = makeActor(playerKey, 260, {
-    team: 'player', facing: 1, hp: 100, weapon: spec.weapon,
-  });
+game.onShot = (a, w, mx, my) => {
+  flash(game.fx, mx + a.facing * 0.15, my, a.facing, w.pellets > 1 ? 2 : 1);
+  casing(game.fx, mx - a.facing * 0.2, my - 0.05, a.facing);
+  const dist = Math.abs(a.x - view.cam.x);
+  if (a.player) shake(game.fx, kickFor(w));
+  else shake(game.fx, kickFor(w) * 0.25 * Math.max(0, 1 - dist / 26));
+  playShot(w.sound, Math.max(-1, Math.min(1, (a.x - view.cam.x) / 12)), dist);
+};
 
-  const world = {
-    level,
-    spec,
-    player,
-    actors: [player],
-    bullets: [],
-    particles: [],
-    flashes: [],
-    fx: [],
-    fxMeta: assets.manifest.fx || {},
-    civilians: [],
-    gunfire: null,
-    camX: 0,
-    shake: 0,
-    time: 0,
-    waveIndex: 0,
-    waveDelay: 1.4,
-    remaining: 0,
-    cleared: false,
-    toast: '',
-    toastTime: 0,
-    onDeath: (a) => {
-      if (a.team === 'player') {
-        game.screen = 'gameover';
-        game.transition = 0;
-      }
-    },
-  };
-  spawnCivilians(world, Math.round(level.width / 230));
-  game.world = world;
-  return world;
-}
+game.onImpact = (x, y, material, b) => {
+  mark(game.fx, x, y, material, b.dx);
+  if (Math.abs(x - view.cam.x) < 24) playImpact(material, (x - view.cam.x) / 12);
+};
 
-// The rival crews: the two captioned gang characters, plus whichever of the
-// playable four the player did not pick.
-const GANG = ['capuz', 'pano'];
-
-/** Enemy roster for a level: rival crews, police, or both. */
-function enemyKeyFor(level, i) {
-  const crews = GANG.concat(PLAYABLE.filter((k) => k !== level.playerKey));
-  if (level.enemy === 'police') return 'po';
-  if (level.enemy === 'mixed') return i % 2 === 0 ? 'po' : crews[(i * 3 + 1) % crews.length];
-  return crews[i % crews.length];
-}
-
-function spawnWave(world) {
-  const level = world.level;
-  const count = level.waves[world.waveIndex];
-  const skill = Math.min(0.95, 0.35 + level.index * 0.11);
-  for (let i = 0; i < count; i++) {
-    const fromRight = i % 2 === 0 ? world.player.x < level.width / 2 : false;
-    const side = fromRight || world.player.x < level.width * 0.4 ? 1 : -1;
-    const x = side > 0
-      ? Math.min(level.width - 40, world.player.x + 900 + i * 120)
-      : Math.max(40, world.player.x - 900 - i * 120);
-    const key = enemyKeyFor(level, i + world.waveIndex * 3);
-    const e = makeActor(key, x, {
-      team: 'enemy',
-      facing: side > 0 ? -1 : 1,
-      hp: 44 + level.index * 5,
-      weapon: charSpec(key).weapon,
-      skill,
-    });
-    world.actors.push(e);
+game.onFlesh = (actor, x, y, zone, dealt, b) => {
+  blood(game.fx, x, y, Math.sign(b.dx) || 1, zone === 'head' ? 1 : 0.6);
+  playImpact('flesh', (x - view.cam.x) / 12);
+  hitstop(game.fx, FEEL.hitstopHit);
+  if (b.team === 'player' && actor.alive) {
+    game.hitmark = 0.22;
+    game.hitmarkAt = { x, y };
+    game.hitmarkKill = false;
   }
-  world.remaining = count;
-  world.toast = `ONDA ${world.waveIndex + 1}`;
-  world.toastTime = 1.6;
-}
-
-function updatePlay(dt) {
-  const world = game.world;
-  world.time += dt;
-  world.shake = Math.max(0, world.shake - dt * 26);
-  world.toastTime = Math.max(0, world.toastTime - dt);
-
-  updatePlayer(world, world.player, input, dt);
-  for (const a of world.actors) {
-    if (a.team !== 'player') updateEnemy(world, a, dt);
+  if (actor.player) {
+    game.flash = Math.min(0.5, game.flash + dealt / 90);
+    shake(game.fx, FEEL.shakeHit);
+    playHurt();
   }
-  updateBullets(world, dt);
-  updateCivilians(world, dt);
-  updateParticles(world, dt);
+};
 
-  // Bodies linger a while, then are cleared out.
-  world.actors = world.actors.filter((a) => a.team === 'player' || !a.dead || a.deadTime < 16);
-  world.remaining = world.actors.filter((a) => a.team === 'enemy' && !a.dead).length;
-
-  if (world.remaining === 0 && !world.cleared) {
-    world.waveDelay -= dt;
-    if (world.waveDelay <= 0) {
-      if (world.waveIndex + 1 < world.level.waves.length) {
-        world.waveIndex++;
-        world.waveDelay = 2.2;
-        spawnWave(world);
-      } else {
-        world.cleared = true;
-        game.screen = 'cleared';
-        game.transition = 0;
-      }
+game.onKill = (actor, from) => {
+  hitstop(game.fx, FEEL.hitstopKill);
+  shake(game.fx, FEEL.shakeKill);
+  playKill();
+  if (!actor.player) {
+    game.kills++;
+    if (from && from.team === 'player') {
+      game.hitmark = 0.3;
+      game.hitmarkAt = { x: actor.x, y: centre(actor) };
+      game.hitmarkKill = true;
     }
+  } else {
+    game.screen = 'dead';
   }
+};
 
-  // Camera leads the way the player faces, so you see what you walk into.
-  const want = world.player.x - W / 2 + world.player.facing * 130;
-  world.camX += (want - world.camX) * Math.min(1, dt * 4.2);
-  world.camX = Math.max(0, Math.min(world.level.width - W, world.camX));
+game.onNearMiss = () => {};
+game.onReloadTick = (a) => { if (a.player) playReloadDone(); };
+
+// --- setting the fight up ------------------------------------------------
+
+function startRun() {
+  game.arena = buildArena(1 + ((Math.random() * 9999) | 0));
+  buildBackdrop(game.arena);
+  game.actors = [];
+  game.bullets = [];
+  game.fx = makeFx();
+  game.kills = 0;
+  game.wave = 0;
+  game.waveTimer = 1.2;
+  game.flash = 0;
+  game.banner = '';
+  game.bannerT = 0;
+
+  const p = makeActor({
+    key: 'p1', name: 'Branco', weapon: 'rifle', team: 'player',
+    player: true, x: game.arena.spawn.player, hp: HEALTH.player,
+  });
+  game.player = p;
+  game.actors.push(p);
+  view.cam.x = p.x;
+  game.screen = 'play';
 }
 
-// ----------------------------------------------------------------- intro
+function spawnWave() {
+  game.wave++;
+  const count = Math.min(9, 2 + Math.floor(game.wave * 1.3));
+  const police = game.wave >= 3;
+  for (let i = 0; i < count; i++) {
+    const pool = police && rand() < 0.4 ? [ENEMY_KINDS[2]] : ENEMY_KINDS.slice(0, 2);
+    const kind = pool[(rand() * pool.length) | 0];
+
+    // They come up the lane from off screen -- far enough not to appear out of
+    // thin air, near enough that the fight starts rather than being walked to.
+    const fromLeft = rand() < 0.5;
+    const side = fromLeft ? -1 : 1;
+    const away = range(rand, [16, 30]);
+    const x = Math.max(2, Math.min(game.arena.length - 2, game.player.x + side * away));
+    const a = makeActor({ ...kind, x, facing: -side });
+    a.brain = makeBrain(a);
+    // Later waves come up the lane already switched on.
+    a.brain.timer = range(rand, [0.2, 1.4]) + i * 0.12;
+    game.actors.push(a);
+  }
+  game.banner = police ? `ONDA ${game.wave} · POLICIA` : `ONDA ${game.wave}`;
+  game.bannerT = 2.6;
+  playUi(true);
+
+  // Between waves you find a little more ammunition than you spent.
+  const w = WEAPONS[game.player.weapon];
+  game.player.reserve = Math.min(w.reserve, game.player.reserve + Math.ceil(w.mag * 2.5));
+}
+
+// --- the player's hand ---------------------------------------------------
 
 /**
- * The level card. On police levels it runs the signal from the design notes
- * first: three firework pops -- the lookouts' code that the police are coming
- * up -- and then the sirens.
+ * The nearest enemy the muzzle can actually reach, and the point on him it can
+ * reach -- which may be only the head showing over a wall.
  */
-function startIntro(levelIndex) {
-  const level = LEVELS[Math.min(levelIndex, LEVELS.length - 1)];
-  const police = level.enemy === 'police' || level.enemy === 'mixed';
-  game.intro = {
-    t: 0,
-    police,
-    pops: police ? [0.5, 0.95, 1.4] : [],
-    fired: 0,
-    flashes: [],
-    duration: police ? 4.4 : 2.6,
-    level,
-  };
-  game.screen = 'intro';
+function autoTarget(p) {
+  const from = { x: p.x, y: muzzleY(p) };
+  let best = null;
+  for (const a of game.actors) {
+    if (a.player || !a.alive) continue;
+    const d = Math.abs(a.x - p.x);
+    if (d > weaponOf(p).far) continue;
+    const spot = aimPoint(game.arena, from, a);
+    if (!spot) continue;
+    const ahead = Math.sign(a.x - p.x) === p.facing;
+    const score = d + (ahead ? 0 : 6);
+    if (!best || score < best.score) best = { spot, score };
+  }
+  return best?.spot || null;
 }
 
-function updateIntro(dt) {
-  const it = game.intro;
-  it.t += dt;
+function readPlayer(input, dt) {
+  const p = game.player;
+  const it = p.intent;
+  if (!p.alive) { it.fire = false; it.move = 0; return; }
 
-  while (it.fired < it.pops.length && it.t >= it.pops[it.fired]) {
-    const x = 320 + it.fired * 250 + Math.random() * 90;
-    it.flashes.push({ x, y: 120 + Math.random() * 90, t: 0 });
-    sfxFirework();
-    it.fired++;
-    if (it.fired === it.pops.length) setTimeout(() => sfxSiren(3), 700);
-  }
-  for (const f of it.flashes) f.t += dt;
+  it.move = moveAxis(input);
+  it.run = input.down('run');
+  it.fire = input.down('fire');
+  it.reload = input.hit('reload');
 
-  if (it.t >= it.duration || consume('fire')) {
-    startLevel(game.levelIndex, PLAYABLE[game.pick]);
-    spawnWave(game.world);
-    game.screen = 'play';
+  if (input.hit('w1')) it.swap = 'rifle';
+  if (input.hit('w2')) it.swap = 'pistol';
+  if (input.hit('w3')) it.swap = 'shotgun';
+
+  // Down goes one stance lower, up goes one higher: stand, crouch, prone.
+  if (input.hit('down')) cycleStance(p, 1);
+  if (input.hit('up')) cycleStance(p, -1);
+  if (input.hit('stance')) {
+    const i = STANCE_ORDER.indexOf(p.want);
+    setStance(p, STANCE_ORDER[(i + 1) % 3]);
   }
+  if (input.hit('prone')) setStance(p, p.want === 'prone' ? 'stand' : 'prone');
+
+  // Aim: the mouse if it has been moved, otherwise the nearest enemy in reach.
+  // Either way the shot is a real line from the muzzle, and cover is cover.
+  if (input.mouse.active) {
+    const wx = toWorldX(input.mouse.x);
+    const wy = Math.max(0.05, toWorldY(input.mouse.y));
+    p.aimTarget = { x: wx, y: wy };
+    p.aimLocked = false;
+  } else {
+    const spot = autoTarget(p);
+    p.aimTarget = spot || { x: p.x + p.facing * 12, y: muzzleY(p) };
+    p.aimLocked = !!spot;
+  }
+  it.aimAt = p.aimTarget;
+
+  if (it.fire && p.mag <= 0 && p.reloading <= 0) {
+    if (p.reserve > 0) startReload(p);
+    else if (p.cooldown <= 0) { playDry(); p.cooldown = 0.35; }
+  }
+  void dt;
 }
 
-function drawIntro() {
-  const it = game.intro;
+// --- the step ------------------------------------------------------------
 
-  ctx.fillStyle = '#0b0c12';
-  ctx.fillRect(0, 0, W, H);
+function step(dt) {
+  const p = game.player;
 
-  // Night sky over the hill, so the fireworks read.
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0a0d1c');
-  g.addColorStop(1, '#1a1420');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  // A silhouetted skyline of real houses.
-  ctx.save();
-  ctx.globalAlpha = 0.9;
-  for (let i = 0; i < 14; i++) {
-    const img = assets.buildings[(i * 5 + it.level.name.length) % assets.buildings.length];
-    if (!img) continue;
-    const s = 0.42 + ((i * 37) % 20) / 100;
-    const w = img.width * s;
-    const h = img.height * s;
-    ctx.globalAlpha = 1;
-    ctx.drawImage(img, i * 108 - 60, H - h - 40, w, h);
+  for (const a of game.actors) {
+    if (a.brain) updateBrain(a, game, dt);
+    updateActor(a, dt, game);
   }
-  ctx.restore();
-  ctx.fillStyle = 'rgba(6,8,16,.72)';
-  ctx.fillRect(0, 0, W, H);
+  separate(game.actors, dt);
+  stepBullets(game, dt);
+  updateFx(game.fx, dt);
 
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (const f of it.flashes) {
-    const a = Math.max(0, 1 - f.t * 1.6);
-    const r = 40 + f.t * 260;
-    const rg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, r);
-    rg.addColorStop(0, `rgba(255,240,200,${a * 0.95})`);
-    rg.addColorStop(0.4, `rgba(255,190,90,${a * 0.35})`);
-    rg.addColorStop(1, 'rgba(255,140,40,0)');
-    ctx.fillStyle = rg;
-    ctx.fillRect(f.x - r, f.y - r, r * 2, r * 2);
+  game.flash = Math.max(0, game.flash - dt * 1.4);
+  game.hitmark = Math.max(0, game.hitmark - dt);
+  game.bannerT = Math.max(0, game.bannerT - dt);
+
+  // The dead are cleared once they have finished falling and faded.
+  game.actors = game.actors.filter((a) => a.player || a.alive || a.dying < 8);
+
+  const enemies = game.actors.filter((a) => !a.player && a.alive).length;
+  if (enemies === 0) {
+    game.waveTimer -= dt;
+    if (game.waveTimer <= 0) {
+      spawnWave();
+      game.waveTimer = 4.5;
+    }
   }
-  ctx.restore();
-
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f2c14e';
-  ctx.font = '700 64px "Trebuchet MS", sans-serif';
-  ctx.fillText(it.level.name.toUpperCase(), W / 2, H / 2 - 10);
-  ctx.fillStyle = 'rgba(232,226,212,.8)';
-  ctx.font = '600 18px "Trebuchet MS", sans-serif';
-  ctx.fillText(
-    `FASE ${game.levelIndex + 1} · ${TIMES[it.level.time].label} · ${WEATHER[it.level.weather].label}`.toUpperCase(),
-    W / 2, H / 2 + 28,
-  );
-
-  if (it.police && it.fired >= it.pops.length) {
-    ctx.fillStyle = '#d8483f';
-    ctx.font = '700 24px "Trebuchet MS", sans-serif';
-    ctx.fillText('FOGOS: A POLÍCIA ESTÁ SUBINDO', W / 2, H / 2 + 88);
-  } else if (it.police) {
-    ctx.fillStyle = 'rgba(232,226,212,.55)';
-    ctx.font = '600 16px "Trebuchet MS", sans-serif';
-    ctx.fillText('...', W / 2, H / 2 + 88);
-  }
-  ctx.restore();
+  void p;
 }
 
-// ---------------------------------------------------------------- screens
+// --- the loop ------------------------------------------------------------
 
-function drawTitle() {
-  ctx.fillStyle = '#0b0c12';
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.save();
-  for (let i = 0; i < 12; i++) {
-    const img = assets.buildings[(i * 9) % assets.buildings.length];
-    if (!img) continue;
-    const s = 0.5 + ((i * 23) % 26) / 100;
-    ctx.globalAlpha = 0.55;
-    ctx.drawImage(img, i * 126 - 80, H - img.height * s - 20, img.width * s, img.height * s);
-  }
-  ctx.restore();
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, 'rgba(9,10,18,.92)');
-  g.addColorStop(1, 'rgba(9,10,18,.62)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f2c14e';
-  ctx.font = '700 108px "Trebuchet MS", sans-serif';
-  ctx.fillText('FAVELA', W / 2, 210);
-  ctx.fillStyle = '#e8e2d4';
-  ctx.font = '600 20px "Trebuchet MS", sans-serif';
-  ctx.fillText('DEFENDA A QUEBRADA', W / 2, 268);
-
-  ctx.fillStyle = 'rgba(232,226,212,.72)';
-  ctx.font = '600 16px "Trebuchet MS", sans-serif';
-  const lines = input.touch
-    ? ['ARRASTE À ESQUERDA PARA ANDAR', 'TOQUE À DIREITA PARA ATIRAR', 'BOTÃO NO CANTO TROCA A POSTURA']
-    : ['SETAS / WASD  ANDAR', 'SHIFT  CORRER', '↓ AGACHAR · DEITAR      ↑ LEVANTAR · SUBIR',
-      'ESPAÇO  ATIRAR (MIRA AUTOMÁTICA)', 'M  SOM      P  PAUSA'];
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, 360 + i * 30));
-
-  ctx.fillStyle = Math.sin(game.time * 4) > 0 ? '#f2c14e' : 'rgba(242,193,78,.35)';
-  ctx.font = '700 22px "Trebuchet MS", sans-serif';
-  ctx.fillText(input.touch ? 'TOQUE PARA COMEÇAR' : 'ESPAÇO PARA COMEÇAR', W / 2, H - 90);
-  ctx.restore();
-}
-
-function drawSelect() {
-  ctx.fillStyle = '#101018';
-  ctx.fillRect(0, 0, W, H);
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#161a26');
-  g.addColorStop(1, '#0c0d12');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = '#f2c14e';
-  ctx.font = '700 34px "Trebuchet MS", sans-serif';
-  ctx.fillText('ESCOLHA SEU PERSONAGEM', W / 2, 62);
-
-  const slot = W / PLAYABLE.length;
-  PLAYABLE.forEach((key, i) => {
-    const spec = charSpec(key);
-    const cx = slot * (i + 0.5);
-    const sel = i === game.pick;
-    const baseY = 494;
-
-    ctx.fillStyle = sel ? 'rgba(242,193,78,.12)' : 'rgba(255,255,255,.03)';
-    ctx.fillRect(cx - slot / 2 + 16, 104, slot - 32, 486);
-    ctx.strokeStyle = sel ? '#f2c14e' : 'rgba(255,255,255,.10)';
-    ctx.lineWidth = sel ? 3 : 1.5;
-    ctx.strokeRect(cx - slot / 2 + 16, 104, slot - 32, 486);
-
-    // The idle loop stands the character up facing forward, which the
-    // turnaround frames do not reliably do -- some of them face away.
-    const frames = anim(key, 'idle');
-    const f = frames[Math.floor(game.time * 5) % frames.length];
-    const scale = sel ? 1.45 : 1.2;
-    drawFrame(ctx, key, f, cx, baseY, 1, scale, sel ? 1 : 0.7);
-
-    ctx.fillStyle = sel ? '#f2c14e' : 'rgba(232,226,212,.75)';
-    ctx.font = '700 26px "Trebuchet MS", sans-serif';
-    ctx.fillText(spec.name.toUpperCase(), cx, baseY + 16);
-    ctx.fillStyle = 'rgba(232,226,212,.6)';
-    ctx.font = '600 14px "Trebuchet MS", sans-serif';
-    const w = WEAPONS[spec.weapon];
-    ctx.fillText(spec.weapon === 'pistol' ? 'PISTOLA · TIRO FORTE' : 'FUZIL · RAJADA', cx, baseY + 48);
-    ctx.fillText(`dano ${w.dmg} · pente ${w.mag}`, cx, baseY + 68);
-  });
-
-  ctx.fillStyle = 'rgba(232,226,212,.6)';
-  ctx.font = '600 16px "Trebuchet MS", sans-serif';
-  ctx.fillText(input.touch ? 'TOQUE NO PERSONAGEM PARA JOGAR' : '← →  ESCOLHER          ESPAÇO  CONFIRMAR', W / 2, H - 42);
-  ctx.restore();
-}
-
-function drawCard(title, subtitle, hint, color = '#f2c14e') {
-  ctx.fillStyle = 'rgba(8,9,14,.82)';
-  ctx.fillRect(0, 0, W, H);
-  ctx.save();
-  ctx.textAlign = 'center';
-  ctx.fillStyle = color;
-  ctx.font = '700 72px "Trebuchet MS", sans-serif';
-  ctx.fillText(title, W / 2, H / 2 - 30);
-  ctx.fillStyle = '#e8e2d4';
-  ctx.font = '600 22px "Trebuchet MS", sans-serif';
-  ctx.fillText(subtitle, W / 2, H / 2 + 26);
-  ctx.fillStyle = Math.sin(game.time * 4) > 0 ? 'rgba(232,226,212,.9)' : 'rgba(232,226,212,.4)';
-  ctx.font = '600 18px "Trebuchet MS", sans-serif';
-  ctx.fillText(hint, W / 2, H / 2 + 96);
-  ctx.restore();
-}
-
-// ------------------------------------------------------------ touch pads
-
-function drawTouchControls() {
-  if (!input.touch) return;
-  ctx.save();
-  ctx.globalAlpha = 0.32;
-
-  const o = touchState.origin;
-  if (o && touchState.stick) {
-    const s = touchState.stick;
-    const len = Math.hypot(s.x, s.y) || 1;
-    const cl = Math.min(80, len);
-    ctx.strokeStyle = '#e8e2d4';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(o.x, o.y, 78, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = '#f2c14e';
-    ctx.beginPath();
-    ctx.arc(o.x + (s.x / len) * cl, o.y + (s.y / len) * cl, 30, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.fillStyle = touchState.fire ? '#f2c14e' : '#e8e2d4';
-  ctx.beginPath();
-  ctx.arc(W - 300, H - 130, 62, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#e8e2d4';
-  ctx.fillRect(W - 170, H - 170, 130, 130);
-  ctx.fillRect(W - 170, H - 340, 130, 130);
-  ctx.globalAlpha = 0.9;
-  ctx.fillStyle = '#15151c';
-  ctx.textAlign = 'center';
-  ctx.font = '700 15px "Trebuchet MS", sans-serif';
-  ctx.fillText('POSTURA', W - 105, H - 110);
-  ctx.fillText('CORRER', W - 105, H - 280);
-  ctx.fillText('TIRO', W - 300, H - 124);
-  ctx.restore();
-}
-
-// ------------------------------------------------------------------ loop
-
+let acc = 0;
 let last = 0;
 
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000 || 0);
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.1, (now - last) / 1000 || 0);
   last = now;
-  game.time += dt;
+  game.lastDt = dt;
 
-  if (consume('pause') && game.screen === 'play') game.paused = !game.paused;
+  const input = game.input;
+  if (input.hit('debug')) game.debug = !game.debug;
+  if (input.hit('mute')) toggleMute();
 
-  switch (game.screen) {
-    case 'title':
-      drawTitle();
-      if (consume('fire') || (input.touch && input.anyKey)) {
-        sfxUI();
-        game.screen = 'select';
-      }
-      break;
-
-    case 'select': {
-      drawSelect();
-      if (consume('left')) { game.pick = (game.pick + PLAYABLE.length - 1) % PLAYABLE.length; sfxUI(false); }
-      if (consume('right')) { game.pick = (game.pick + 1) % PLAYABLE.length; sfxUI(); }
-      if (consume('fire')) {
-        sfxUI();
-        game.levelIndex = 0;
-        startIntro(0);
-      }
-      break;
-    }
-
-    case 'intro':
-      updateIntro(dt);
-      drawIntro();
-      break;
-
-    case 'play': {
-      if (!game.paused) updatePlay(dt);
-      drawWorld(ctx, game.world);
-      drawHud(ctx, game.world);
-      drawMinimap(ctx, game.world);
-      drawTouchControls();
-      if (game.paused) drawCard('PAUSA', '', 'P PARA VOLTAR');
-      break;
-    }
-
-    case 'cleared': {
-      game.transition += dt;
-      drawWorld(ctx, game.world);
-      drawHud(ctx, game.world);
-      const last = game.levelIndex >= LEVELS.length - 1;
-      drawCard(
-        last ? 'QUEBRADA SEGURA' : 'ÁREA LIMPA',
-        last ? 'Você segurou todas as fases.' : `Fase ${game.levelIndex + 1} concluída`,
-        last ? 'ESPAÇO PARA VOLTAR AO INÍCIO' : 'ESPAÇO PARA A PRÓXIMA FASE',
-        '#6fbf5e',
-      );
-      if (game.transition > 0.7 && consume('fire')) {
-        sfxUI();
-        if (last) {
-          game.screen = 'title';
-        } else {
-          game.levelIndex++;
-          startIntro(game.levelIndex);
-        }
-      }
-      break;
-    }
-
-    case 'gameover': {
-      game.transition += dt;
-      if (!game.paused) {
-        // Let the death animation and the bullets already in the air finish.
-        const world = game.world;
-        world.time += dt;
-        updateBullets(world, dt);
-        updateParticles(world, dt);
-        for (const a of world.actors) if (a.team !== 'player') updateEnemy(world, a, dt);
-        updatePlayer(world, world.player, { held: {}, pressed: {} }, dt);
-      }
-      drawWorld(ctx, game.world);
-      drawCard('CAIU', `Fase ${game.levelIndex + 1} · ${game.world.level.name}`, 'ESPAÇO PARA TENTAR DE NOVO', '#d8483f');
-      if (game.transition > 1 && consume('fire')) {
-        sfxUI();
-        startIntro(game.levelIndex);
-      }
-      break;
-    }
-
-    default:
-      break;
+  if (game.screen === 'title') {
+    if (input.hit('start') || input.hit('fire')) { resumeAudio(); startRun(); }
+  } else if (game.screen === 'dead') {
+    if (input.hit('start') || input.hit('fire')) { playUi(false); game.screen = 'title'; }
+  } else if (input.hit('pause')) {
+    game.screen = game.screen === 'pause' ? 'play' : 'pause';
   }
 
-  endFrame();
-  requestAnimationFrame(frame);
+  if (game.screen === 'play') {
+    readPlayer(input, dt);
+    acc += dt;
+    let steps = 0;
+    while (acc >= STEP && steps++ < 5) {
+      if (game.fx.hitstop > 0) { game.fx.hitstop -= STEP; acc -= STEP; continue; }
+      step(STEP);
+      acc -= STEP;
+    }
+    updateCamera(game, dt);
+  }
+
+  if (game.arena) {
+    renderFrame(game);
+    if (game.screen !== 'title') drawHud(game);
+    if (game.debug) drawDebug(game);
+  }
+  if (game.screen === 'title') drawTitle(game);
+  if (game.screen === 'pause') drawPause();
+  if (game.screen === 'dead') drawDead(game);
+
+  input.flush();
 }
 
-// ------------------------------------------------------------------ boot
+// --- boot ----------------------------------------------------------------
 
 async function boot() {
-  const bootEl = document.getElementById('boot');
-  const bar = bootEl.querySelector('#bar i');
+  const canvas = document.getElementById('game');
+  const bar = document.querySelector('#bar i');
+  initRender(canvas);
+  game.input = makeInput(canvas);
 
-  initInput(canvas, () => {
-    initAudio();
-    resumeAudio();
-  });
+  await loadAssets('assets', (k) => { if (bar) bar.style.width = `${Math.round(k * 100)}%`; });
+  document.getElementById('boot')?.classList.add('done');
 
-  addEventListener('keydown', (e) => {
-    if (e.code === 'KeyM') toggleMute();
-  });
+  // A quiet lane to look at behind the title screen.
+  game.arena = buildArena(4);
+  buildBackdrop(game.arena);
+  game.player = makeActor({ key: 'p1', weapon: 'rifle', team: 'player', player: true, x: game.arena.spawn.player });
+  game.actors = [game.player];
+  view.cam.x = game.player.x;
 
-  try {
-    await loadAssets('assets', (p) => { bar.style.width = `${Math.round(p * 100)}%`; });
-  } catch (err) {
-    bootEl.innerHTML = `<span style="letter-spacing:0">Não foi possível carregar os assets.<br>
-      Rode um servidor local: <code>python3 -m http.server</code></span>`;
-    throw err;
-  }
+  // The whole state, reachable from the console -- tuning a fight is a lot
+  // easier when you can read the numbers out of it while it is running.
+  window.FAVELA = game;
 
-  bootEl.classList.add('done');
-  game.screen = 'title';
-  requestAnimationFrame((t) => { last = t; frame(t); });
+  requestAnimationFrame((t) => { last = t; requestAnimationFrame(frame); });
 }
 
 boot();

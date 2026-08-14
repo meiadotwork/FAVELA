@@ -1,9 +1,8 @@
 # FAVELA
 
-A 2D cover shooter in HTML5. You pick one of four characters and hold the alley
-against rival crews and police raids across six levels, each at a different time
-of day and in different weather. The rival crews field a hooded pistoleiro and a
-shotgun carrier; the police come in behind an armoured caveirão.
+A 2D cover shooter in HTML5. You hold a lane in the favela against crews coming
+up it from both ends, and the whole fight is decided by where you stand, how low
+you stand there, and when you decide to stand up.
 
 No build step, no dependencies — open it over a local server and it runs.
 
@@ -21,7 +20,7 @@ asset manifest.
 python3 tools/bundle.py dist/favela.html --quality=70
 ```
 
-Folds the whole game into a single ~8 MB HTML file — modules concatenated, CSS
+Folds the whole game into a single HTML file — modules concatenated, CSS
 inlined, every atlas and prop a data URI — which opens straight from the
 filesystem and can be hosted anywhere a page can. Each module keeps its own
 scope inside the bundle, publishing its exports to one shared namespace, so two
@@ -34,69 +33,97 @@ modules that both declare `ctx` at the top level still cannot collide.
 | Arrows / WASD | Move |
 | Shift | Run |
 | ↓ | Crouch, then go prone |
-| ↑ | Stand back up — or climb, at a ladder |
-| Space | Fire (aim is automatic) |
-| C | Cycle stance |
-| P | Pause · M Mute |
+| ↑ | Stand back up |
+| Space / left mouse | Fire |
+| Mouse | Aim — move it and it takes over; leave it and the aim goes back to automatic |
+| R | Reload |
+| 1 2 3 | Rifle, pistol, shotgun |
+| C | Cycle stance · P Pause · M Mute |
+| F1 | Draw the mechanics |
 
 On touch, the left half of the screen is a virtual stick, the right half fires,
-and the corner buttons are run and stance.
+and the corner pads are run, stance and reload.
 
 ## How the fight works
 
-The mechanics come from `game mechanics.txt` in the art drop.
+Everything below is in `src/tuning.js`, in metres and seconds. The art states
+its own scale — the sheets are captioned 1.78 m at 110 px — so the simulation is
+written in real units and converted to pixels in exactly one place. A 4 m/s
+sprint is a sprint, and a 14 m shotgun range is a distance you can pace out.
 
-**Stance is the whole game.** Standing walks and runs, crouching only creeps,
-prone barely moves at all. Stance sets two numbers — how tall your body is and
-how high your muzzle sits — and cover is a box with a top edge. A bullet is
-stopped when it crosses a box below that edge. Everything follows from those
-three numbers:
+**Stance is the spine of it.** Each stance sets four numbers: how tall your body
+is, how high your muzzle sits, how fast you move, and how steady you shoot.
+Cover is a box with a top edge, and a round is stopped when it crosses a box
+below that edge. Every situation in the game falls out of those numbers:
 
 - Crouch behind a low wall and incoming fire hits the wall — but so does yours.
-- Stand up and your muzzle clears the wall, and so does the enemy's line to you.
-- Cars are bulletproof to the sill and glass above it, so a standing shot passes
-  through the windows while a crouched one hits the body.
-- A house corner juts into the lane at full height: you step past it to shoot and
-  step back behind it to be safe.
-- The caveirão is armoured throughout, with no glass band. Nothing goes through it.
+- Stand up and your muzzle clears it, and so does the enemy's line to you.
+- A wall shorter than 1.15 m is no good crouching: you have to go prone, and
+  crawling away from it costs the best part of a second.
+- Cars are bulletproof to the sill and glass above it, so a standing shot goes
+  through the windows while a crouched one hits the bodywork.
+- A house corner juts into the lane at full height and no stance clears it. You
+  step out past the edge to shoot and step back in to be safe — the enemy AI
+  uses corners exactly the same way.
+- The caveirão is armoured throughout, with no glass band. Nothing goes through
+  it, which is why the bot that hugs it lands a third of its shots in it.
 
-Weapons differ in how they answer that geometry. The rifle is a steady stream,
-the pistol hits harder per shot, and the shotgun throws six pellets that spread
-wide and fall short — murderous across a doorway, close to useless down the
-length of the alley.
+Changing stance takes time — 0.22 s to drop to a crouch, 0.85 s to get up off
+the floor — and you cannot fire mid-change. Half-way through a transition your
+body height is genuinely half-way too, which is how you get shot standing up.
 
-**Aim is automatic**, as specified. The shot is steered onto the nearest target
-ahead of you, so the decisions are where to stand and when to stand up, not
-where to point. Enemies get a detuned version of the same aim — they miss, fire
-in bursts, and hit for half — because perfect tracking in their hands is not a
-fight, it is a formality.
+**Aim finds what is exposed.** The shot is steered onto the nearest enemy the
+muzzle can actually reach, and the aim point is the highest-value part of him
+that is not behind something: centre mass if he is in the open, the head and
+shoulders if that is all that clears his wall. Heads take two and a half times
+damage, so peeking is expensive for both sides. Move the mouse and you take the
+aim over yourself; leave it alone and it goes back to automatic.
 
-**Police levels open with the code**: three firework pops over the hill, the
-lookouts' signal that the police are coming up, then the sirens. A caveirao is
-parked in the alley on those levels — armoured throughout, the one piece of
-cover nothing shoots through.
+**Weapons answer that geometry differently.** The rifle is a steady stream that
+reaches down the lane and blooms as you hold the trigger. The pistol hits harder
+per shot and blooms faster. The shotgun throws eight pellets that spread wide
+and fall off hard past five metres — murderous across a doorway, close to
+useless down the length of the alley — and it feeds one shell at a time, so a
+reload can be cut short to get one round off.
 
-**The street is inhabited.** Residents walk the lane on their own business and
-run for it when a shot goes off nearby, heads down, dropping whatever they were
-carrying. They cannot be shot — bullets pass through them — so the street
-emptying is atmosphere and a warning, never a target.
+**Fire that misses still counts.** A round passing within about a metre
+suppresses whoever it passes, and only along the stretch it actually flew — a
+bullet that buries itself in the wall in front of a man has not gone past his
+ear. Suppressed enemies stay down and stop shooting; suppress one for long
+enough and he gives the box up as a bad job and works his way to another one,
+which is what stops a firefight settling into a stalemate.
 
-Roughly every third house is climbable — a ladder at one end, a roof to fight
-down from.
+**The other side runs the same code.** Enemies are actors with a brain filling
+in the intent instead of a keyboard: they pick a box by how far it sits from
+*you* rather than how close it is to them, work out which side of it faces the
+threat, and then either shoot over it and duck, or step around it and step back.
+Their aim is detuned deliberately — error that decays the longer they have you
+in sight but never reaches zero, drift so a burst walks across you instead of
+stapling itself to one spot, damage at half, and no head multiplier. Perfect
+tracking in their hands is not a fight, it is a formality.
+
+Press **F1** and all of it is drawn: cover boxes with their top edges, damage
+zones on every body, muzzle heights, the spread cone, and a line from each enemy
+muzzle to you that goes green when it is clear and red where it is blocked.
 
 ## Layout
 
 ```
 index.html, style.css
 src/
-  game.js      screens, waves, the main loop
-  civilians.js residents of the lane, and what makes them run
-  level.js     level layout, cover boxes, the bullet-blocking rule
-  actors.js    stances, shooting, enemy AI
-  render.js    parallax favela, cover, weather, HUD
+  tuning.js    every number in the game, in metres and seconds
+  world.js     the lane, the cover boxes, and the bullet-blocking rule
+  actor.js     stance, movement, weapon handling, health
+  combat.js    rounds in flight, hit tests, damage, suppression
+  ai.js        the enemy brain
+  fx.js        flashes, casings, blood, decals, shake, hitstop
+  render.js    parallax favela, dirt, cover, actors
+  hud.js       health, ammo, stance, spread, screens
+  debug.js     the mechanics overlay
+  input.js     keyboard, mouse and touch, flattened to named actions
+  audio.js     synthesised gunfire
   assets.js    atlas loading and anchored sprite drawing
-  audio.js     synthesised gunfire, fireworks, sirens
-  input.js     keyboard and touch, flattened to named actions
+  game.js      the loop, the waves, the player's hand
 tools/
   slicer.py         cuts the raw sprite sheets into frames
   build_assets.py   builds the runtime atlases and manifest
@@ -104,6 +131,11 @@ tools/
 assets/        generated — atlases, buildings, assets.json
 dist/          generated — the single-file build (not committed)
 ```
+
+The simulation runs on a fixed 60 Hz step with the frame time accumulated, so
+reload times, stance transitions and spread behave the same on any machine; a
+slow frame draws late rather than stepping further. `window.FAVELA` is the whole
+game state, reachable from the console while it runs.
 
 ## Rebuilding the art
 
@@ -148,9 +180,6 @@ resident is dressed differently and their frames sit together on the sheet.
 Frames shorter than that person's standing height are their panic poses, which is
 how the flee animation is found without labelling anything.
 
-Sound is synthesised at runtime — the drop had no audio, and a firefight is
-mostly noise bursts and sirens.
-
 **The captioned sheets are read, not parsed.** The two gang characters arrive on
 one sheet each with every animation on it and a caption per row. Finding those
 groups automatically failed: the captions sit level with the frames they label
@@ -168,6 +197,18 @@ x, so no vertical cut separates them, and they are taken as whole blobs instead.
 If those sheets are ever re-exported, laying them out like the effects sheet —
 one animation per row, caption clear above the frames, uniform cell pitch — would
 let them cut with no table at all.
+
+Sound is synthesised at runtime — the drop had no audio, and a firefight is
+mostly noise bursts.
+
+## Not in this build
+
+The mechanics core was rewritten from scratch and the content that used to sit
+on top of it has not been rebuilt yet: no character select, no numbered levels
+with their own time of day and weather, no residents walking the lane, no
+ladders or rooftops, and no police raid opening with fireworks and sirens. The
+art for all of it is still in `assets/` and the manifest still carries the
+civilians, so it can go back on top of the new core.
 
 ## Credit
 

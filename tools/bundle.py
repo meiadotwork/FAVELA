@@ -22,7 +22,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Dependency order: a module may only import from those already loaded.
-MODULES = ['assets', 'audio', 'input', 'level', 'actors', 'civilians', 'render', 'game']
+MODULES = ['assets', 'tuning', 'world', 'actor', 'combat', 'ai', 'fx', 'input', 'audio',
+           'render', 'hud', 'debug', 'game']
 
 MIME = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg'}
 

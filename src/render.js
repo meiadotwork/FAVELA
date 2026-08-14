@@ -1,513 +1,448 @@
-// Drawing. The lane is built in depth order: sky, distant hillside, the row of
-// houses, then everything standing in the lane itself. Cover is textured by
-// sampling the base of a real house sprite, so a wall in the street is made of
-// the same masonry as the buildings behind it rather than flat canvas colour.
+// Drawing the lane.
+//
+// The simulation is in metres with the ground at y = 0 and up as positive.
+// Exactly one place converts that to pixels -- sx()/sy() below -- so every
+// sprite, box and particle in the game agrees about where the floor is.
 
-import { assets, drawFrame } from './assets.js';
-import { GROUND_Y } from './level.js';
-import { currentFrame, poseHeight, STANCE, WEAPONS } from './actors.js';
-import { civFrame } from './civilians.js';
+import { PX_PER_M, SPRITE_SCALE, FEEL } from './tuning.js';
+import { assets, anim, frameAt, drawFrame } from './assets.js';
+import { rng } from './world.js';
+import { bodyHeight } from './actor.js';
 
-export const W = 1280;
-export const H = 720;
-
-const rnd = (seed) => {
-  const s = Math.sin(seed * 12.9898) * 43758.5453;
-  return s - Math.floor(s);
+export const view = {
+  ctx: null,
+  W: 1280,
+  H: 720,
+  groundY: 0,        // screen y of the ground line
+  cam: { x: 0, target: 0 },
+  dirt: null,
+  backdrop: null,
 };
 
-export function drawWorld(ctx, world) {
-  const { level, camX } = world;
-  const shakeX = (Math.random() - 0.5) * world.shake;
-  const shakeY = (Math.random() - 0.5) * world.shake;
-
-  drawSky(ctx, level, camX);
-
-  ctx.save();
-  ctx.translate(-camX + shakeX, shakeY);
-
-  drawSkyline(ctx, level, camX);
-  drawHouses(ctx, level, camX);
-  drawGround(ctx, level, camX);
-  drawProps(ctx, level, camX);
-
-  drawCivilians(ctx, world);
-
-  // Cover and bodies interleave: anything the player can hide behind is drawn
-  // after them, so ducking actually puts the wall in front of the body.
-  for (const a of world.actors) if (a.dead) drawActor(ctx, a, world);
-  for (const a of world.actors) if (!a.dead) drawActor(ctx, a, world);
-
-  drawCovers(ctx, level, camX);
-  drawBullets(ctx, world);
-  drawFx(ctx, world);
-  drawParticles(ctx, world);
-
-  ctx.restore();
-
-  drawWeather(ctx, world);
-  drawLightAndTint(ctx, world);
+export function initRender(canvas) {
+  view.ctx = canvas.getContext('2d');
+  view.W = canvas.width;
+  view.H = canvas.height;
+  view.groundY = Math.round(view.H * 0.80);
+  view.dirt = paintDirt(1024, Math.round(view.H - view.groundY) + 40);
+  return view.ctx;
 }
 
-// ------------------------------------------------------------------ sky
+export const sx = (x) => (x - view.cam.x) * PX_PER_M + view.W / 2;
+export const sy = (y) => view.groundY - y * PX_PER_M;
+export const toWorldX = (px) => view.cam.x + (px - view.W / 2) / PX_PER_M;
+export const toWorldY = (py) => (view.groundY - py) / PX_PER_M;
 
-function drawSky(ctx, level, camX) {
-  const t = level.time;
-  const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-  g.addColorStop(0, t.sky[0]);
-  g.addColorStop(0.55, t.sky[1]);
-  g.addColorStop(1, t.sky[2]);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
+// --- the ground ----------------------------------------------------------
+//
+// Beaten red earth, painted once into an offscreen tile and repeated: bands of
+// dried mud, loose stones, wheel ruts and standing water, with the near edge
+// falling into shadow.
 
-  if (t.sun) {
-    const sx = W * t.sun.x - camX * 0.02;
-    const sy = H * t.sun.y;
-    const glow = ctx.createRadialGradient(sx, sy, 8, sx, sy, 340);
-    glow.addColorStop(0, t.sun.glow);
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(sx - 340, sy - 340, 680, 680);
-  } else {
-    // Night: a scatter of stars, plus the city glow off the horizon.
-    ctx.fillStyle = 'rgba(255,255,255,.65)';
-    for (let i = 0; i < 70; i++) {
-      const x = (rnd(i) * 2200 - camX * 0.05) % W;
-      ctx.globalAlpha = 0.25 + rnd(i + 99) * 0.65;
-      ctx.fillRect(x < 0 ? x + W : x, rnd(i + 7) * 300, 1.6, 1.6);
-    }
-    ctx.globalAlpha = 1;
-    const glow = ctx.createLinearGradient(0, 220, 0, 460);
-    glow.addColorStop(0, 'rgba(0,0,0,0)');
-    glow.addColorStop(1, 'rgba(255,170,90,.14)');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 220, W, 240);
+function paintDirt(w, h) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const g = c.getContext('2d');
+  const rand = rng(0xd127);
+
+  const grad = g.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, '#6b4128');
+  grad.addColorStop(0.18, '#8a5636');
+  grad.addColorStop(0.62, '#9a6440');
+  grad.addColorStop(1, '#4a2c1b');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, w, h);
+
+  // Broad blotches of wetter and drier earth.
+  for (let i = 0; i < 260; i++) {
+    const x = rand() * w;
+    const y = rand() * h;
+    const r = 14 + rand() * 90;
+    const light = rand() < 0.5;
+    const a = 0.05 + rand() * 0.1;
+    const rg = g.createRadialGradient(x, y, 0, x, y, r);
+    rg.addColorStop(0, light ? `rgba(190,140,98,${a})` : `rgba(60,34,20,${a})`);
+    rg.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = rg;
+    g.beginPath();
+    g.ellipse(x, y, r, r * 0.45, 0, 0, 6.283);
+    g.fill();
   }
-}
 
-function drawSkyline(ctx, level, camX) {
-  // The hillside behind the lane: same houses, small and stacked up a slope,
-  // scrolling at a fraction of the camera so it sits far back.
-  const par = 0.28;
-  ctx.save();
-  ctx.translate(camX * (1 - par), 0);
-  for (const s of level.skyline) {
-    const img = assets.buildings[s.img];
-    if (!img) continue;
-    const w = img.width * s.scale;
-    const h = img.height * s.scale;
-    if (s.x + w < camX * par - 240 || s.x > camX * par + W + 240) continue;
-    ctx.drawImage(img, s.x, s.base - h, w, h);
+  // Ruts running down the lane.
+  for (let i = 0; i < 22; i++) {
+    const y = rand() * h;
+    g.strokeStyle = rand() < 0.5 ? 'rgba(52,30,18,0.22)' : 'rgba(196,150,108,0.16)';
+    g.lineWidth = 1 + rand() * 3;
+    g.beginPath();
+    g.moveTo(0, y);
+    for (let x = 0; x <= w; x += 32) g.lineTo(x, y + Math.sin(x * 0.01 + i) * 3);
+    g.stroke();
   }
-  ctx.restore();
 
-  // Aerial haze: the hillside takes on the sky's colour with distance. It
-  // fades in from nothing at the top so there is no visible seam.
-  const haze = ctx.createLinearGradient(0, 120, 0, GROUND_Y);
-  haze.addColorStop(0, `${level.time.sky[1]}00`);
-  haze.addColorStop(0.55, `${level.time.sky[1]}5c`);
-  haze.addColorStop(1, `${level.time.sky[2]}30`);
-  ctx.save();
-  ctx.translate(camX, 0);
-  ctx.fillStyle = haze;
-  ctx.fillRect(0, 120, W, GROUND_Y - 120);
-  ctx.restore();
-}
-
-function drawHouses(ctx, level, camX) {
-  for (const h of level.houses) {
-    const img = assets.buildings[h.img];
-    if (!img) continue;
-    if (h.x + h.w < camX - 200 || h.x > camX + W + 200) continue;
-    ctx.drawImage(img, h.x, GROUND_Y - h.h, h.w, h.h);
+  // Puddles: a dark pool with a bright rim where the light catches the water.
+  for (let i = 0; i < 9; i++) {
+    const x = rand() * w;
+    const y = h * (0.35 + rand() * 0.55);
+    const rx = 18 + rand() * 55;
+    const ry = rx * (0.2 + rand() * 0.12);
+    g.fillStyle = 'rgba(58,38,24,0.55)';
+    g.beginPath();
+    g.ellipse(x, y, rx, ry, 0, 0, 6.283);
+    g.fill();
+    g.fillStyle = 'rgba(168,132,96,0.28)';
+    g.beginPath();
+    g.ellipse(x - rx * 0.15, y - ry * 0.3, rx * 0.7, ry * 0.5, 0, 0, 6.283);
+    g.fill();
   }
-  // Contact shadow where the row meets the street.
-  const sh = ctx.createLinearGradient(0, GROUND_Y - 40, 0, GROUND_Y + 6);
-  sh.addColorStop(0, 'rgba(0,0,0,0)');
-  sh.addColorStop(1, 'rgba(0,0,0,.32)');
-  ctx.fillStyle = sh;
-  ctx.fillRect(camX - 100, GROUND_Y - 40, W + 200, 46);
+
+  // Stones.
+  for (let i = 0; i < 900; i++) {
+    const x = rand() * w;
+    const y = rand() * h;
+    const r = 0.7 + rand() * 2.6;
+    g.fillStyle = rand() < 0.45 ? 'rgba(212,180,142,0.5)' : 'rgba(48,28,17,0.45)';
+    g.beginPath();
+    g.ellipse(x, y, r, r * 0.7, rand() * 3, 0, 6.283);
+    g.fill();
+  }
+  return c;
 }
 
-function drawGround(ctx, level, camX) {
-  const g = ctx.createLinearGradient(0, GROUND_Y, 0, H);
-  g.addColorStop(0, '#5d5850');
-  g.addColorStop(0.25, '#4b4741');
-  g.addColorStop(1, '#332f2b');
-  ctx.fillStyle = g;
-  ctx.fillRect(camX - 100, GROUND_Y, W + 200, H - GROUND_Y);
-
-  // Cobbles and cracks, hashed off world x so they hold still as it scrolls.
-  ctx.save();
-  const x0 = Math.floor((camX - 100) / 46) * 46;
-  for (let x = x0; x < camX + W + 100; x += 46) {
-    for (let row = 0; row < 3; row++) {
-      const y = GROUND_Y + 12 + row * 32;
-      const j = rnd(x * 0.13 + row * 3.7);
-      ctx.fillStyle = `rgba(0,0,0,${0.05 + j * 0.09})`;
-      ctx.fillRect(x + (row % 2) * 23 + j * 6, y, 38, 3);
+/**
+ * The favela behind the lane: three ranks of houses climbing the hill, each
+ * moving less than the one in front. `lift` is how far up the slope a rank
+ * sits, in metres, which is what turns a row of shacks into a hillside.
+ */
+export function buildBackdrop(arena) {
+  const rand = rng(arena.seed * 31 + 5);
+  const layers = [
+    { par: 0.20, lift: 7.5, scale: 1.15, tint: 'rgba(24,26,44,0.66)', items: [] },
+    { par: 0.44, lift: 3.4, scale: 1.0, tint: 'rgba(28,26,38,0.42)', items: [] },
+    { par: 0.72, lift: 0.0, scale: 0.86, tint: 'rgba(20,18,26,0.18)', items: [] },
+  ];
+  const n = assets.buildings.length;
+  for (const layer of layers) {
+    let x = -40;
+    while (x < arena.length + 40) {
+      const i = (rand() * n) | 0;
+      const b = assets.manifest.buildings[i];
+      const w = (b.w * SPRITE_SCALE * layer.scale) / PX_PER_M;
+      layer.items.push({ i, x, w, lift: layer.lift + rand() * 1.6, flip: rand() < 0.4 });
+      x += w * (0.6 + rand() * 0.28);
     }
   }
-  ctx.restore();
+  view.backdrop = layers;
 }
 
-function drawProps(ctx, level, camX) {
-  for (const p of level.props) {
-    if (p.x < camX - 260 || p.x > camX + W + 260) continue;
-    if (p.kind === 'line') {
-      ctx.strokeStyle = 'rgba(20,18,16,.55)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      ctx.quadraticCurveTo(p.x + p.w / 2, p.y + 16, p.x + p.w, p.y - 6);
-      ctx.stroke();
-      for (let i = 0; i < 4; i++) {
-        const t = 0.15 + i * 0.22;
-        const lx = p.x + p.w * t;
-        const ly = p.y + 12 - Math.abs(t - 0.5) * 18;
-        ctx.fillStyle = `hsl(${(p.hue + i * 37) % 360} 55% 62%)`;
-        ctx.fillRect(lx, ly, 15, 26);
-        ctx.fillStyle = 'rgba(0,0,0,.12)';
-        ctx.fillRect(lx, ly, 15, 4);
-      }
-    } else {
-      ctx.fillStyle = 'rgba(60,80,90,.22)';
-      ctx.beginPath();
-      ctx.ellipse(p.x, GROUND_Y + 26, p.w * 0.28, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
+function drawBackdrop() {
+  const { ctx, W } = view;
+  const sky = ctx.createLinearGradient(0, 0, 0, view.groundY);
+  sky.addColorStop(0, '#1b1a2c');
+  sky.addColorStop(0.55, '#41304a');
+  sky.addColorStop(0.85, '#8c5b47');
+  sky.addColorStop(1, '#c08a5c');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, view.groundY + 2);
+
+  for (const layer of view.backdrop) {
+    const off = view.cam.x * (1 - layer.par);
+    for (const it of layer.items) {
+      const b = assets.manifest.buildings[it.i];
+      const img = assets.buildings[it.i];
+      if (!img) continue;
+      const w = b.w * SPRITE_SCALE * layer.scale;
+      const h = b.h * SPRITE_SCALE * layer.scale;
+      const x = sx(it.x + off);
+      if (x > W + w || x + w < -w) continue;
+      const y = sy(it.lift) - h;
+      ctx.save();
+      ctx.translate(x + w / 2, y + h / 2);
+      if (it.flip) ctx.scale(-1, 1);
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
     }
+    // One flat wash per rank, which is what puts them behind each other.
+    ctx.fillStyle = layer.tint;
+    ctx.fillRect(0, 0, W, view.groundY);
   }
 }
 
-// ---------------------------------------------------------------- cover
+function drawGround() {
+  const { ctx, W, H } = view;
+  const tile = view.dirt;
+  const y = view.groundY - 6;
 
-function drawCovers(ctx, level, camX) {
-  for (const c of level.covers) {
-    if (c.x1 < camX - 120 || c.x0 > camX + W + 120) continue;
-    if (c.kind === 'car' || c.kind === 'truck') drawVehicle(ctx, c);
-    else drawMasonry(ctx, c);
+  // The far side of the lane: a band of shadow at the foot of the houses that
+  // stops the sky showing through the gaps between them at ankle height.
+  const base = ctx.createLinearGradient(0, sy(2.4), 0, view.groundY);
+  base.addColorStop(0, 'rgba(18,13,16,0)');
+  base.addColorStop(0.45, 'rgba(20,13,13,0.45)');
+  base.addColorStop(1, 'rgba(20,13,12,0.92)');
+  ctx.fillStyle = base;
+  ctx.fillRect(0, sy(2.4), W, view.groundY - sy(2.4) + 2);
+  const offset = ((view.cam.x * PX_PER_M) % tile.width + tile.width) % tile.width;
+  for (let x = -offset; x < W; x += tile.width) {
+    ctx.drawImage(tile, Math.round(x), y, tile.width, tile.height);
   }
+  const shade = ctx.createLinearGradient(0, y, 0, H);
+  shade.addColorStop(0, 'rgba(20,12,8,0.55)');
+  shade.addColorStop(0.25, 'rgba(20,12,8,0)');
+  shade.addColorStop(0.8, 'rgba(10,6,4,0.55)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, y, W, H - y);
 }
 
-/** A slab of wall, textured from a real masonry panel. */
-function drawMasonry(ctx, c) {
-  // A corner is a slice of its own house, so it matches what it juts out of;
-  // everything else is cut from a flat wall panel.
-  const img = c.house != null ? assets.buildings[c.house] : assets.walls[c.panel];
-  const w = c.x1 - c.x0;
-  const y = GROUND_Y - c.top;
-  if (img) {
-    // Sample at the panel's own aspect so the brickwork is not stretched, and
-    // take the band nearest the ground, which is where the walls are.
-    const sh = Math.min(img.height, c.top / (w / img.width || 1));
-    const sw = Math.min(img.width, w * (sh / c.top));
-    const sx = Math.max(0, Math.min(img.width - sw, c.seed * (img.width - sw)));
+// --- cover ---------------------------------------------------------------
+
+function drawWall(cover) {
+  const { ctx } = view;
+  const spec = assets.manifest.walls?.[cover.art % (assets.manifest.walls?.length || 1)];
+  const img = assets.walls[cover.art % assets.walls.length];
+  const w = cover.w * PX_PER_M;
+  const h = cover.h * PX_PER_M;
+  const x = sx(cover.x0);
+  const y = sy(cover.h);
+  if (img && spec) {
+    // Show the foot of the masonry, tiled across, so the courses stay square.
+    const srcH = Math.min(spec.h, (h / SPRITE_SCALE));
+    const srcY = spec.h - srcH;
+    const stepW = spec.w * SPRITE_SCALE;
     ctx.save();
     ctx.beginPath();
-    ctx.rect(c.x0, y, w, c.top);
+    ctx.rect(x, y, w, h);
     ctx.clip();
-    ctx.drawImage(img, sx, img.height - sh, sw, sh, c.x0, y, w, c.top);
+    for (let dx = 0; dx < w + stepW; dx += stepW) {
+      ctx.drawImage(img, 0, srcY, spec.w, srcH, x + dx, y, stepW, h);
+    }
     ctx.restore();
   } else {
-    ctx.fillStyle = '#8d8375';
-    ctx.fillRect(c.x0, y, w, c.top);
+    ctx.fillStyle = '#6a6157';
+    ctx.fillRect(x, y, w, h);
   }
-
-  // A capping course and a shadow give the slab a top edge to read against.
-  ctx.fillStyle = 'rgba(232,226,210,.55)';
-  ctx.fillRect(c.x0 - 3, y - 6, w + 6, 8);
-  ctx.fillStyle = 'rgba(0,0,0,.28)';
-  ctx.fillRect(c.x0 - 3, y + 2, w + 6, 3);
-  ctx.fillStyle = 'rgba(0,0,0,.18)';
-  ctx.fillRect(c.x0, GROUND_Y - 6, w, 6);
-  ctx.strokeStyle = 'rgba(25,20,16,.45)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(c.x0, y, w, c.top);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(x, y, w, 3);
 }
 
-/** A parked vehicle. The sprite is the cover: its sill is the line bullets stop at. */
-function drawVehicle(ctx, c) {
-  const img = c.kind === 'truck' ? assets.caveirao : assets.cars[c.art];
-  const w = c.x1 - c.x0;
-  if (!img) {
-    ctx.fillStyle = '#4a4a52';
-    ctx.fillRect(c.x0, GROUND_Y - c.top, w, c.top);
-    return;
+function drawCorner(cover) {
+  const { ctx } = view;
+  const i = cover.art % assets.buildings.length;
+  const img = assets.buildings[i];
+  const spec = assets.manifest.buildings[i];
+  const w = cover.w * PX_PER_M;
+  const h = cover.h * PX_PER_M;
+  const x = sx(cover.x0);
+  const y = sy(cover.h);
+  if (img) {
+    const srcW = Math.min(spec.w, (w / SPRITE_SCALE) * (spec.h / (h / SPRITE_SCALE)));
+    ctx.drawImage(img, 0, 0, srcW, spec.h, x, y, w, h);
+  } else {
+    ctx.fillStyle = '#4c4740';
+    ctx.fillRect(x, y, w, h);
   }
-  const h = c.kind === 'truck' ? c.top / 0.98 : c.top / 0.60;
+}
 
+function drawVehicle(cover) {
+  const { ctx } = view;
+  const isTruck = cover.kind === 'caveirao';
+  const img = isTruck ? assets.caveirao : assets.cars[cover.art % assets.cars.length];
+  const spec = isTruck ? assets.manifest.caveirao : assets.manifest.cars[cover.art % assets.manifest.cars.length];
+  if (!img) return;
+  const w = spec.w * SPRITE_SCALE;
+  const h = spec.h * SPRITE_SCALE;
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,.30)';
-  ctx.beginPath();
-  ctx.ellipse(c.x0 + w / 2, GROUND_Y + 4, w * 0.48, 9, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.drawImage(img, c.x0, GROUND_Y - h, w, h);
+  ctx.translate(sx(cover.x), sy(0));
+  if (cover.flip) ctx.scale(-1, 1);
+  ctx.drawImage(img, -w / 2, -h, w, h);
   ctx.restore();
 }
 
-function drawCivilians(ctx, world) {
-  for (const c of world.civilians) {
-    if (c.x < world.camX - 200 || c.x > world.camX + W + 200) continue;
-    const frame = civFrame(c);
-    if (!frame) continue;
-    ctx.save();
-    ctx.fillStyle = 'rgba(0,0,0,.24)';
-    ctx.beginPath();
-    ctx.ellipse(c.x, GROUND_Y + 3, frame.w * 0.4, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    drawFrame(ctx, 'civ', frame, c.x, GROUND_Y, c.facing, 1, 1);
+function drawCover(cover) {
+  if (cover.kind === 'wall') drawWall(cover);
+  else if (cover.kind === 'corner') drawCorner(cover);
+  else drawVehicle(cover);
+}
+
+// --- actors --------------------------------------------------------------
+
+/** Which frame of an animation an actor is on, given how it is moving. */
+function frameIndex(a) {
+  switch (a.anim) {
+    case 'walk': case 'walkAim': case 'crouch': return Math.floor(a.step / 0.72);
+    case 'run': return Math.floor(a.step / 1.05);
+    case 'proneCrawl': return Math.floor(a.step / 0.45);
+    case 'shoot': case 'crouchShoot': case 'proneShoot': return Math.floor(a.animT * 22);
+    case 'hit': return Math.min(2, Math.floor(a.animT * 18));
+    case 'death': return Math.floor(a.dying * 11);
+    default: return Math.floor(a.animT * 6);
   }
 }
 
-// --------------------------------------------------------------- actors
-
-function drawActor(ctx, a, world) {
-  const frame = currentFrame(a);
-  if (!frame) return;
-
-  // Ground shadow, tightened up when prone.
-  const s = STANCE[a.stance];
+function drawShadow(a) {
+  const { ctx } = view;
+  const w = (a.stance === 'prone' ? 1.5 : 0.75) * PX_PER_M * 0.6;
   ctx.save();
-  ctx.fillStyle = 'rgba(0,0,0,.30)';
+  ctx.globalAlpha = 0.38;
+  ctx.fillStyle = '#150d09';
   ctx.beginPath();
-  ctx.ellipse(a.x, a.y + 3, s.width * 0.72, 8, 0, 0, Math.PI * 2);
+  ctx.ellipse(sx(a.x), sy(0) + 2, w, 7, 0, 0, 6.283);
   ctx.fill();
   ctx.restore();
+}
 
-  drawFrame(ctx, a.key, frame, a.x, a.y, a.facing, 1, a.dead ? Math.max(0.25, 1 - a.deadTime / 14) : 1);
+export function drawActor(a) {
+  const { ctx } = view;
+  drawShadow(a);
+  const dead = !a.alive;
+  const i = frameIndex(a);
 
-  if (a.hitFlash > 0) {
+  // Loops wrap; a death animation plays once and stays down.
+  const frames = anim(a.key, a.anim);
+  const f = dead
+    ? frames[Math.min(frames.length - 1, i)]
+    : frameAt(a.key, a.anim, i);
+
+  const alpha = dead ? Math.max(0.25, 1 - Math.max(0, a.dying - 6) * 0.5) : 1;
+  drawFrame(ctx, a.key, f, sx(a.x), sy(0), a.facing, SPRITE_SCALE, alpha);
+
+  if (!dead && a.hurt > 0) {
     ctx.save();
+    ctx.globalAlpha = Math.min(0.5, a.hurt * 2.4);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = a.hitFlash * 2.4;
-    drawFrame(ctx, a.key, frame, a.x, a.y, a.facing, 1, 1);
+    ctx.fillStyle = '#7a1010';
+    ctx.fillRect(sx(a.x) - 26, sy(bodyHeight(a)), 52, bodyHeight(a) * PX_PER_M);
     ctx.restore();
   }
 
-  if (!a.dead && a.team !== 'player') drawEnemyPip(ctx, a);
-  if (!a.dead && a.team === 'player') drawPlayerMark(ctx, a, world);
+  if (!a.player && !dead) drawEnemyTag(a);
 }
 
-function drawEnemyPip(ctx, a) {
-  const top = a.y - poseHeight(a) - 16;
-  const w = 40;
-  ctx.fillStyle = 'rgba(0,0,0,.5)';
-  ctx.fillRect(a.x - w / 2, top, w, 5);
-  ctx.fillStyle = a.hp > a.maxHp * 0.4 ? '#d8483f' : '#f0a24a';
-  ctx.fillRect(a.x - w / 2, top, w * (a.hp / a.maxHp), 5);
+function drawEnemyTag(a) {
+  const { ctx } = view;
+  const x = sx(a.x);
+  const y = sy(bodyHeight(a)) - 12;
+  const w = 34;
+  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillRect(x - w / 2, y, w, 4);
+  ctx.fillStyle = a.team === 'police' ? '#5aa9e6' : '#e05a4a';
+  ctx.fillRect(x - w / 2, y, w * (a.hp / a.maxHp), 4);
 }
 
-function drawPlayerMark(ctx, a, world) {
-  const top = a.y - poseHeight(a) - 26;
-  const bob = Math.sin(world.time * 4) * 2;
+// --- effects -------------------------------------------------------------
+
+export function drawFx(fx, bullets) {
+  const { ctx } = view;
+
   ctx.save();
-  ctx.fillStyle = 'rgba(242,193,78,.95)';
-  ctx.beginPath();
-  ctx.moveTo(a.x, top + bob + 9);
-  ctx.lineTo(a.x - 7, top + bob);
-  ctx.lineTo(a.x + 7, top + bob);
-  ctx.closePath();
-  ctx.fill();
+  for (const d of fx.decals) {
+    ctx.fillStyle = d.colour;
+    ctx.beginPath();
+    ctx.ellipse(sx(d.x), sy(d.y), d.w * PX_PER_M, d.h * PX_PER_M * 0.4, 0, 0, 6.283);
+    ctx.fill();
+  }
   ctx.restore();
-}
 
-function drawBullets(ctx, world) {
+  for (const c of fx.casings) {
+    ctx.save();
+    ctx.translate(sx(c.x), sy(c.y));
+    ctx.rotate(c.ang);
+    ctx.fillStyle = '#d8b25a';
+    ctx.fillRect(-3, -1.2, 6, 2.4);
+    ctx.restore();
+  }
+
+  // Tracers: a short bright streak along the round's own path.
   ctx.save();
   ctx.lineCap = 'round';
-  for (const b of world.bullets) {
-    const len = Math.min(46, Math.abs(b.vx) * 0.016);
-    ctx.strokeStyle = b.team === 'player' ? 'rgba(255,236,170,.95)' : 'rgba(255,186,140,.9)';
-    ctx.lineWidth = 2.4;
+  for (const b of bullets) {
+    const tail = b.weapon === 'shotgun' ? 0.5 : 1.3;
+    ctx.strokeStyle = b.team === 'player' ? 'rgba(255,226,150,0.92)' : 'rgba(255,168,120,0.85)';
+    ctx.lineWidth = b.weapon === 'shotgun' ? 1.4 : 2;
     ctx.beginPath();
-    ctx.moveTo(b.x, b.y);
-    ctx.lineTo(b.x - Math.sign(b.vx) * len, b.y - b.vy * 0.016);
+    ctx.moveTo(sx(b.x), sy(b.y));
+    ctx.lineTo(sx(b.x - b.dx * tail), sy(b.y - b.dy * tail));
     ctx.stroke();
   }
   ctx.restore();
-}
 
-function drawFx(ctx, world) {
-  for (const e of world.fx) {
-    const frames = assets.fx[e.kind];
-    if (!frames || !frames.length) continue;
-    const i = Math.min(frames.length - 1, Math.floor(e.t * e.fps));
-    const img = frames[i];
+  for (const mk of fx.marks) {
+    const list = assets.fx[mk.material] || assets.fx.dirt || [];
+    const img = list[mk.i % (list.length || 1)];
+    const k = 1 - mk.t / mk.life;
     if (!img) continue;
-    const meta = assets.manifest.fx[e.kind][i];
+    const spec = assets.manifest.fx[mk.material][mk.i % list.length];
+    const w = spec.w * SPRITE_SCALE;
+    const h = spec.h * SPRITE_SCALE;
     ctx.save();
-    ctx.globalAlpha = e.fade ? Math.max(0, Math.min(1, e.fade - e.t * 0.02)) : 1;
-    // Bursts sit centred on the impact; a pool spreads on the ground below it.
-    const y = e.ground ? GROUND_Y - meta.h * 0.75 : e.y - meta.h / 2;
-    ctx.drawImage(img, e.x - meta.w / 2, y, meta.w, meta.h);
+    ctx.globalAlpha = Math.max(0, k);
+    ctx.drawImage(img, sx(mk.x) - w / 2, sy(mk.y) - h / 2, w, h);
     ctx.restore();
   }
-}
 
-function drawParticles(ctx, world) {
-  for (const p of world.particles) {
-    ctx.globalAlpha = Math.max(0, p.life / p.max);
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x, p.y, p.size, p.size);
+  for (const p of fx.sparks) {
+    const k = 1 - p.t / p.life;
+    ctx.globalAlpha = Math.max(0, k);
+    ctx.fillStyle = p.hot ? '#ffd68a' : p.colour;
+    const s = p.size * PX_PER_M;
+    ctx.fillRect(sx(p.x) - s / 2, sy(p.y) - s / 2, s, s);
   }
   ctx.globalAlpha = 1;
 
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (const f of world.flashes) {
-    const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
-    g.addColorStop(0, `rgba(255,226,150,${f.t * 9})`);
-    g.addColorStop(1, 'rgba(255,180,60,0)');
+  for (const f of fx.flashes) {
+    const k = 1 - f.t / f.life;
+    const r = (0.28 + f.size * 0.18) * PX_PER_M * (0.7 + k * 0.5);
+    const x = sx(f.x);
+    const y = sy(f.y);
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(255,244,206,${0.95 * k})`);
+    g.addColorStop(0.35, `rgba(255,183,72,${0.6 * k})`);
+    g.addColorStop(1, 'rgba(255,120,20,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(f.x - f.r, f.y - f.r, f.r * 2, f.r * 2);
-  }
-  ctx.restore();
-}
-
-// --------------------------------------------------------------- weather
-
-function drawWeather(ctx, world) {
-  const { weather, time } = world.level;
-
-  if (weather.rain > 0) {
-    ctx.save();
-    ctx.strokeStyle = time.sun ? 'rgba(200,220,240,.42)' : 'rgba(170,195,230,.34)';
-    ctx.lineWidth = 1.3;
-    const n = Math.floor(180 * weather.rain);
-    const slant = 60 * weather.wind;
-    for (let i = 0; i < n; i++) {
-      const seed = i * 1.37;
-      const speed = 900 + rnd(seed) * 700;
-      const x = ((rnd(seed) * 1600 + world.time * slant * 4) % 1500) - 110 - world.camX * 0.25 % 200;
-      const y = ((rnd(seed + 3) * H + world.time * speed) % (H + 120)) - 60;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - slant * 0.22, y + 22);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-
-  if (weather.fog > 0) {
-    const g = ctx.createLinearGradient(0, GROUND_Y - 300, 0, H);
-    g.addColorStop(0, `rgba(200,205,215,0)`);
-    g.addColorStop(1, `rgba(198,203,214,${weather.fog})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, GROUND_Y - 300, W, H - GROUND_Y + 300);
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, 6.283);
+    ctx.fill();
   }
 }
 
-function drawLightAndTint(ctx, world) {
-  const t = world.level.time;
-  ctx.save();
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.fillStyle = t.shade;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
+// --- the whole frame -----------------------------------------------------
 
-  ctx.save();
-  ctx.globalCompositeOperation = 'overlay';
-  ctx.fillStyle = t.tint;
-  ctx.fillRect(0, 0, W, H);
-  ctx.restore();
-
-  // At night the muzzle flashes are the light source, so they get to bloom.
-  if (t.ambient < 0.7) {
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    for (const f of world.flashes) {
-      const x = f.x - world.camX;
-      const g = ctx.createRadialGradient(x, f.y, 0, x, f.y, 260);
-      g.addColorStop(0, `rgba(255,205,120,${f.t * 3.4})`);
-      g.addColorStop(1, 'rgba(255,150,40,0)');
-      ctx.fillStyle = g;
-      ctx.fillRect(x - 260, f.y - 260, 520, 520);
-    }
-    ctx.restore();
-  }
-
-  // Vignette
-  const v = ctx.createRadialGradient(W / 2, H / 2, H * 0.42, W / 2, H / 2, H * 0.95);
-  v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, `rgba(0,0,0,${0.34 + (1 - t.ambient) * 0.3})`);
-  ctx.fillStyle = v;
-  ctx.fillRect(0, 0, W, H);
-}
-
-// ------------------------------------------------------------------ HUD
-
-export function drawHud(ctx, world) {
-  const p = world.player;
-  ctx.save();
-  ctx.font = '600 15px "Trebuchet MS", sans-serif';
-  ctx.textBaseline = 'top';
-
-  // Health
-  ctx.fillStyle = 'rgba(10,10,14,.62)';
-  ctx.fillRect(22, 20, 268, 46);
-  ctx.fillStyle = 'rgba(255,255,255,.14)';
-  ctx.fillRect(30, 28, 252, 14);
-  const hp = Math.max(0, p.hp / p.maxHp);
-  ctx.fillStyle = hp > 0.5 ? '#6fbf5e' : hp > 0.25 ? '#f0a24a' : '#d8483f';
-  ctx.fillRect(30, 28, 252 * hp, 14);
-  ctx.fillStyle = '#e8e2d4';
-  ctx.fillText(`${world.spec.name.toUpperCase()}`, 30, 46);
-
-  // Ammo and stance
-  const mag = WEAPONS[p.weapon].mag;
-  ctx.textAlign = 'right';
-  ctx.fillStyle = 'rgba(10,10,14,.62)';
-  ctx.fillRect(W - 250, 20, 228, 46);
-  ctx.fillStyle = p.reloading > 0 ? '#f0a24a' : '#e8e2d4';
-  ctx.font = '700 22px "Trebuchet MS", sans-serif';
-  ctx.fillText(p.reloading > 0 ? 'RECARREGANDO' : `${p.ammo} / ${mag}`, W - 34, 24);
-  ctx.font = '600 13px "Trebuchet MS", sans-serif';
-  ctx.fillStyle = 'rgba(232,226,212,.75)';
-  const stanceLabel = { stand: 'EM PÉ', crouch: 'AGACHADO', prone: 'DEITADO' }[p.stance];
-  ctx.fillText(stanceLabel, W - 34, 50);
-
-  // Level banner
-  ctx.textAlign = 'center';
-  ctx.fillStyle = 'rgba(10,10,14,.55)';
-  ctx.fillRect(W / 2 - 190, 20, 380, 46);
-  ctx.fillStyle = '#f2c14e';
-  ctx.font = '700 17px "Trebuchet MS", sans-serif';
-  ctx.fillText(`${world.level.index + 1}. ${world.level.name.toUpperCase()}`, W / 2, 25);
-  ctx.fillStyle = 'rgba(232,226,212,.7)';
-  ctx.font = '600 12px "Trebuchet MS", sans-serif';
-  ctx.fillText(
-    `${world.level.time.label} · ${world.level.weather.label} · onda ${world.waveIndex + 1}/${world.level.waves.length} · ${world.remaining} restantes`,
-    W / 2, 48,
-  );
-
-  ctx.restore();
-
-  if (world.toast && world.toastTime > 0) {
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, world.toastTime * 1.6);
-    ctx.textAlign = 'center';
-    ctx.font = '700 40px "Trebuchet MS", sans-serif';
-    ctx.fillStyle = '#f2c14e';
-    ctx.shadowColor = 'rgba(0,0,0,.8)';
-    ctx.shadowBlur = 14;
-    ctx.fillText(world.toast, W / 2, 150);
-    ctx.restore();
+export function updateCamera(game, dt) {
+  const p = game.player;
+  const lead = p.aimTarget ? Math.sign(p.aimTarget.x - p.x) : p.facing;
+  const want = p.x + lead * FEEL.cameraLead * (p.intent.fire ? 1 : 0.55);
+  const cam = view.cam;
+  const half = view.W / (2 * PX_PER_M);
+  const clampLo = half - 4;
+  const clampHi = game.arena.length - half + 4;
+  cam.target = Math.max(clampLo, Math.min(clampHi, want));
+  if (Math.abs(cam.target - cam.x) > FEEL.cameraDead) {
+    cam.x += (cam.target - cam.x) * Math.min(1, FEEL.cameraLerp * dt);
   }
 }
 
-/** Minimap strip: where the player is along the lane, and where the enemies are. */
-export function drawMinimap(ctx, world) {
-  const x0 = 22;
-  const y0 = 78;
-  const w = 268;
+export function renderFrame(game) {
+  const { ctx, W, H } = view;
+  const shakeX = (Math.random() - 0.5) * game.fx.shake * 2.2;
+  const shakeY = (Math.random() - 0.5) * game.fx.shake * 1.6;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
   ctx.save();
-  ctx.fillStyle = 'rgba(10,10,14,.5)';
-  ctx.fillRect(x0, y0, w, 12);
-  for (const a of world.actors) {
-    if (a.dead) continue;
-    const t = a.x / world.level.width;
-    ctx.fillStyle = a.team === 'player' ? '#f2c14e' : '#d8483f';
-    ctx.fillRect(x0 + t * w - 1.5, y0 + 2, 3, 8);
-  }
+  ctx.translate(shakeX, shakeY);
+
+  drawBackdrop();
+  drawGround();
+
+  const back = game.arena.covers.filter((c) => !c.front);
+  const front = game.arena.covers.filter((c) => c.front);
+  back.forEach(drawCover);
+
+  const order = game.actors.slice().sort((a, b) => (a.alive === b.alive ? a.x - b.x : (a.alive ? 1 : -1)));
+  for (const a of order) drawActor(a);
+
+  drawFx(game.fx, game.bullets);
+  front.forEach(drawCover);
+
   ctx.restore();
 }
