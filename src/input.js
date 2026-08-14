@@ -22,6 +22,7 @@ const KEYMAP = {
   KeyC: 'stance',
   KeyE: 'swap',
   KeyZ: 'zoom',
+  KeyF: 'climb',
   Digit1: 'w1', Digit2: 'w2', Digit3: 'w3',
   KeyP: 'pause', Escape: 'pause',
   KeyM: 'mute',
@@ -119,6 +120,7 @@ export function makeInput(canvas) {
     const y = h - 96;
     input.pads = [
       { a: 'fire', x: w - 112, y: y - 4, r: 82, label: 'TIRO' },
+      { a: 'climb', x: w - 190, y: y - 150, r: 50, label: 'SOBE' },
       { a: 'reload', x: w - 268, y, r: 52, label: 'CARREGA' },
       { a: 'stance', x: w - 388, y, r: 52, label: 'AGACHA' },
       { a: 'swap', x: w - 508, y, r: 52, label: 'ARMA' },

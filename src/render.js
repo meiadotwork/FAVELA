@@ -17,8 +17,10 @@ export const view = {
   H: 720,
   groundY: 0,        // screen y of the ground line
   cam: { x: 0, target: 0 },
-  zoom: 1,
-  zoomStep: 0,
+  // One step back by default: a real 6 m house fills a third of the screen at
+  // 1x, which makes the lane feel like a corridor. 0.72 shows 27 m of it.
+  zoom: 0.72,
+  zoomStep: 1,
   dirt: null,
   backdrop: null,
   house: null,
@@ -30,7 +32,6 @@ export function initRender(canvas) {
   view.H = canvas.height;
   view.groundY = Math.round(view.H * 0.80);
   view.dirt = paintDirt(1024, Math.round(view.H - view.groundY) + 40);
-  view.house = paintHouse(HOUSE);
   return view.ctx;
 }
 
@@ -227,6 +228,8 @@ function drawHouse(arena) {
     const h = (img.height / img.width) * w;
     ctx.drawImage(img, x, sy(0) - h, w, h);
   } else {
+    // No artwork: paint one, once, to whatever the measurements now say.
+    if (!view.house) view.house = paintHouse(HOUSE);
     const { canvas, metres } = view.house;
     const h = metres * pxm();
     ctx.drawImage(canvas, x, sy(0) - h, w, h);
@@ -257,6 +260,7 @@ function frameIndex(a, n) {
       return Math.floor((a.step / (2 * strideOf(a))) * n);
     case 'crouch':
       return moving ? Math.floor((a.step / (2 * strideOf(a))) * n) : Math.floor(a.animT * 5);
+    case 'climb': return Math.floor(a.animT * 7);
     case 'shoot': case 'crouchShoot': case 'proneShoot': return Math.floor(a.animT * 22);
     case 'hit': return Math.min(2, Math.floor(a.animT * 18));
     case 'death': return Math.floor(a.dying * 11);
@@ -271,7 +275,7 @@ function drawShadow(a) {
   ctx.globalAlpha = 0.38;
   ctx.fillStyle = '#150d09';
   ctx.beginPath();
-  ctx.ellipse(sx(posX(a)), sy(0) + 2, w, 7 * view.zoom, 0, 0, 6.283);
+  ctx.ellipse(sx(posX(a)), sy(a.y) + 2, w, 7 * view.zoom, 0, 0, 6.283);
   ctx.fill();
   ctx.restore();
 }
@@ -286,14 +290,14 @@ export function drawActor(a) {
   const f = dead ? frames[Math.min(frames.length - 1, i)] : frameAt(a.key, a.anim, i);
 
   const alpha = dead ? Math.max(0.25, 1 - Math.max(0, a.dying - 6) * 0.5) : 1;
-  drawFrame(ctx, a.key, f, sx(posX(a)), sy(0), a.facing, sprite(), alpha);
+  drawFrame(ctx, a.key, f, sx(posX(a)), sy(a.y), a.facing, sprite(), alpha);
 
   if (!dead && a.hurt > 0) {
     ctx.save();
     ctx.globalAlpha = Math.min(0.5, a.hurt * 2.4);
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = '#7a1010';
-    ctx.fillRect(sx(posX(a)) - 26 * view.zoom, sy(bodyHeight(a)), 52 * view.zoom, bodyHeight(a) * pxm());
+    ctx.fillRect(sx(posX(a)) - 26 * view.zoom, sy(a.y + bodyHeight(a)), 52 * view.zoom, bodyHeight(a) * pxm());
     ctx.restore();
   }
 
@@ -303,7 +307,7 @@ export function drawActor(a) {
 function drawEnemyTag(a) {
   const { ctx } = view;
   const x = sx(posX(a));
-  const y = sy(bodyHeight(a)) - 12;
+  const y = sy(a.y + bodyHeight(a)) - 12;
   const w = 34 * Math.max(0.7, view.zoom);
   ctx.fillStyle = 'rgba(0,0,0,0.45)';
   ctx.fillRect(x - w / 2, y, w, 4);

@@ -6,7 +6,7 @@
 
 import { loadAssets } from './assets.js';
 import { STANCE_ORDER, FEEL, HEALTH, WEAPONS } from './tuning.js';
-import { buildArena, rng, range } from './world.js';
+import { buildArena, climbAt, setHouse, rng, range } from './world.js';
 import {
   makeActor, updateActor, separate, setStance, cycleStance,
   centre, muzzleX, muzzleY, weaponOf, startReload,
@@ -51,6 +51,7 @@ const game = {
   banner: '',
   bannerT: 0,
   debug: false,
+  canClimb: false,
   lastDt: STEP,
   input: null,
 };
@@ -211,6 +212,7 @@ function readPlayer(input, dt) {
     it.swap = WEAPON_CYCLE[(WEAPON_CYCLE.indexOf(p.weapon) + 1) % WEAPON_CYCLE.length];
   }
   if (input.hit('zoom')) { setZoom(view.zoomStep + 1); playUi(view.zoom > 0.8); }
+  if (input.hit('climb')) it.climb = true;
 
   // Down goes one stance lower, up goes one higher: stand, crouch, prone.
   if (input.hit('down')) cycleStance(p, 1);
@@ -237,6 +239,9 @@ function readPlayer(input, dt) {
     p.aimLocked = !!spot;
   }
   it.aimAt = p.aimTarget;
+
+  // Whether there is a wall within reach, for the button to say so.
+  game.canClimb = !!climbAt(game.arena, p.x, p.y) && !p.climb;
 
   if (it.fire && p.mag <= 0 && p.reloading <= 0) {
     if (p.reserve > 0) startReload(p);
@@ -332,7 +337,11 @@ async function boot() {
   initRender(canvas);
   game.input = makeInput(canvas);
 
-  await loadAssets('assets', (k) => { if (bar) bar.style.width = `${Math.round(k * 100)}%`; });
+  const manifest = await loadAssets('assets', (k) => {
+    if (bar) bar.style.width = `${Math.round(k * 100)}%`;
+  });
+  // The artwork carries its own measurements; the level is built from those.
+  setHouse(manifest.house?.metres);
   document.getElementById('boot')?.classList.add('done');
 
   // A quiet lane to look at behind the title screen.

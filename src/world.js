@@ -44,23 +44,41 @@ function box(kind, x, w, h, opts = {}) {
   };
 }
 
-/** The house, in metres. The door is 2 m and everything else is measured off it. */
+/**
+ * The house, in metres, measured off its own artwork.
+ *
+ * The door is the ruler: 2 m, 467 px in the drawing, which puts the wall at
+ * 6.17 m and the roof slab 3.14 m up. Everything else in the level -- the
+ * corner you fight around, the height of the cover, where the roof is and how
+ * far the climb goes -- is derived from these, so re-measuring the art is the
+ * only thing anyone ever has to change.
+ */
 export const HOUSE = {
-  w: 5.6,          // wall to wall, as drawn
-  h: 2.9,          // ground to the top of the roof slab
-  door: 2.0,       // the ruler the rest of the art is drawn against
-  tank: 0.8,       // the water tank standing on the roof
-  jut: 0.9,        // how much of it actually stands in the lane
+  w: 6.17,         // wall to wall, as drawn
+  h: 3.14,         // ground to the top of the roof slab: the floor of the roof
+  art: 3.97,       // the whole drawing, tank included
+  clear: [0.25, 3.15],  // the stretch of slab with nothing standing on it
+  door: 2.0,       // the ruler the rest of it is measured against
+  tank: 0.83,      // the water tank standing on the slab
+  jut: 0.9,        // how much of the building actually stands in the lane
 };
+
+/** Take the measurements from the manifest when the real artwork supplies them. */
+export function setHouse(metres) {
+  if (!metres) return HOUSE;
+  Object.assign(HOUSE, metres);
+  return HOUSE;
+}
 
 /**
  * One house on an empty lane.
  *
- * There is nothing else to hide behind, which is the point: the house is a
- * solid block at full height that no stance shoots over, so the fight is about
- * its two corners. The crew comes from one end only, which makes the far corner
- * -- the one facing away from them -- the safe side, and stepping past the near
- * one the price of taking a shot.
+ * There is nothing else to hide behind, which is the point. The house is cover
+ * and nothing more: you walk straight past it, and while its corner is between
+ * you and the lane nothing gets through at any stance. The crew comes from one
+ * end only, so the far side of that corner is safe ground and stepping past it
+ * is the price of taking a shot. The roof is the other way to use the same
+ * building -- higher, with a longer view, and nothing at all to hide behind.
  */
 export function buildArena(seed = 7) {
   const len = WORLD.laneLength;
@@ -77,7 +95,6 @@ export function buildArena(seed = 7) {
     material: 'concrete',
     front: false,
     mine: true,             // the player's corner; the crew does not get to use it
-    solid: true,
   });
 
   return {
@@ -86,6 +103,19 @@ export function buildArena(seed = 7) {
     // Where the artwork goes, which is wider than the thing that stops bullets.
     art: { x0: cornerX - HOUSE.w, w: HOUSE.w },
     corner,
+    // The roof: only the stretch of slab with nothing standing on it, measured
+    // off the artwork, so a man never ends up inside the water tank.
+    roofs: [{
+      y: HOUSE.h,
+      x0: cornerX - HOUSE.w + HOUSE.clear[0],
+      x1: cornerX - HOUSE.w + HOUSE.clear[1],
+    }],
+    // You go up the far wall -- the side the shooting is not coming from.
+    climbs: [{
+      foot: cornerX - HOUSE.w - 0.5,                     // at the foot of it
+      landing: cornerX - HOUSE.w + HOUSE.clear[0] + 0.5, // and over the parapet
+      top: HOUSE.h,
+    }],
     // Everything arrives from up the lane, so one side of the corner is safe.
     threat: 1,                                  // the direction they come from
     spawn: {
@@ -172,23 +202,21 @@ export function coverSlot(cover, fromX) {
   return cover.x + side * (cover.w / 2 + 0.35);
 }
 
-/**
- * Push a body out of anything solid.
- *
- * Low cover is walked past, which is why boxes do not block movement in
- * general -- but a house is a house. Being able to stand inside its footprint
- * made the corner a free kill: the wall hid the body from every shot while the
- * muzzle, half a metre in front of it, was already round the edge and firing.
- */
-export function pushOutOfSolids(arena, x, halfWidth) {
-  for (const c of arena.covers) {
-    if (!c.solid) continue;
-    if (x + halfWidth <= c.x0 || x - halfWidth >= c.x1) continue;
-    const left = c.x0 - halfWidth;
-    const right = c.x1 + halfWidth;
-    return Math.abs(x - left) < Math.abs(x - right) ? left : right;
+/** The climb within reach of a body standing here, or null. */
+export function climbAt(arena, x, y) {
+  for (const c of arena.climbs || []) {
+    const near = y > 0.01 ? c.landing : c.foot;
+    if (Math.abs(x - near) < 1.4 && (y < 0.01 || Math.abs(y - c.top) < 0.01)) return c;
   }
-  return x;
+  return null;
+}
+
+/** How far a roof at this height runs, for keeping feet on it. */
+export function roofSpan(arena, y) {
+  for (const r of arena.roofs || []) {
+    if (Math.abs(r.y - y) < 0.01) return [r.x0, r.x1];
+  }
+  return null;
 }
 
 /** The lowest stance whose muzzle clears a box, given where you stand. */

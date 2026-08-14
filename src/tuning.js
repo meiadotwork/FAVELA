@@ -90,7 +90,7 @@ export const WEAPONS = {
     reserve: 300,
     reload: 2.35,
     shellReload: false,
-    speed: 175,           // m/s -- arcade-slow so a tracer reads on screen
+    speed: 340,           // m/s -- fast enough that range stops being lead
     near: 26,             // full damage out to here
     far: 65,              // quarter damage here, and nothing beyond
     kick: 0.55,           // camera and muzzle rise
@@ -110,7 +110,7 @@ export const WEAPONS = {
     reserve: 150,
     reload: 1.75,
     shellReload: false,
-    speed: 130,
+    speed: 260,
     near: 12,
     far: 32,
     kick: 0.75,
@@ -130,7 +130,7 @@ export const WEAPONS = {
     reserve: 60,
     reload: 0.52,         // per shell -- see shellReload
     shellReload: true,    // fed one at a time, and interruptible
-    speed: 95,
+    speed: 190,
     near: 5,
     far: 14,
     kick: 2.0,
@@ -205,9 +205,8 @@ export const FEEL = {
   cameraLerp: 4.5,
   aimClamp: 22,           // degrees of elevation the sprites can pretend to hold
   bodyPush: 2.6,          // m/s of separation between overlapping actors
-  lean: 1.45,             // m you can put your shoulders past a corner
-  leanOut: 0.26,          // seconds to lean out
-  leanIn: 0.20,           // and to pull back in
+  climbUp: 1.15,          // seconds on the wall, going up
+  climbDown: 0.75,        // and coming down
   zooms: [1, 0.72, 0.52], // how far the camera can be pulled back, in steps
 };
 

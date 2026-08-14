@@ -22,7 +22,7 @@ export function aimPoint(arena, from, target) {
   const h = bodyHeight(target);
   const x = posX(target);
   for (const f of AIM_POINTS) {
-    const y = h * f;
+    const y = target.y + h * f;
     if (!traceCover(arena, from.x, from.y, x, y)) return { x, y };
   }
   return null;
@@ -69,7 +69,7 @@ function segBox(x0, y0, x1, y1, b) {
 /** Distance from a body's centre line to the path of a round, for suppression. */
 function nearMiss(x0, y0, x1, y1, a) {
   const cx = posX(a);
-  const cy = hitbox(a).y1 * 0.6;
+  const cy = a.y + bodyHeight(a) * 0.6;
   const dx = x1 - x0;
   const dy = y1 - y0;
   const len2 = dx * dx + dy * dy || 1e-9;

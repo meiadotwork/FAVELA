@@ -6,8 +6,8 @@
 // simulation reads.
 
 import { WEAPONS, STANCES, SUPPRESSION } from './tuning.js';
-import { view, sx, sy, pxm } from './render.js';
-import { spreadOf, muzzleX, muzzleY } from './actor.js';
+import { view, sx, sy } from './render.js';
+import { spreadOf } from './actor.js';
 
 const GOLD = '#f2c14e';
 const INK = 'rgba(10,8,10,0.55)';
@@ -26,38 +26,6 @@ function label(ctx, text, x, y, size = 12, colour = '#e8e2d4', align = 'left') {
   ctx.textAlign = align;
   ctx.textBaseline = 'alphabetic';
   ctx.fillText(text, x, y);
-}
-
-/** The crosshair opens exactly as far as the shot can stray. */
-function crosshair(game) {
-  const { ctx } = view;
-  const p = game.player;
-  if (!p.alive) return;
-  const target = p.aimTarget;
-  if (!target) return;
-
-  const dist = Math.hypot(target.x - muzzleX(p), target.y - muzzleY(p));
-  const spread = (spreadOf(p) * Math.PI) / 180;
-  const gap = Math.max(5, Math.tan(spread) * dist * pxm());
-  const x = sx(target.x);
-  const y = sy(target.y);
-
-  ctx.save();
-  ctx.strokeStyle = p.aimLocked ? 'rgba(242,193,78,0.9)' : 'rgba(232,226,212,0.75)';
-  ctx.lineWidth = 1.5;
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-    ctx.beginPath();
-    ctx.moveTo(x + dx * gap, y + dy * gap);
-    ctx.lineTo(x + dx * (gap + 7), y + dy * (gap + 7));
-    ctx.stroke();
-  }
-  if (p.aimLocked) {
-    ctx.strokeStyle = 'rgba(242,193,78,0.55)';
-    ctx.beginPath();
-    ctx.arc(x, y, gap + 3, 0, 6.283);
-    ctx.stroke();
-  }
-  ctx.restore();
 }
 
 function healthBlock(game) {
@@ -239,12 +207,14 @@ function touchPads(game) {
   stickRing(game);
 
   for (const pad of input.pads) {
-    const lit = input.down(pad.a);
+    const lit = input.down(pad.a) || (pad.a === 'climb' && game.canClimb);
+    const dim = pad.a === 'climb' && !game.canClimb;
     ctx.save();
     ctx.beginPath();
     ctx.arc(pad.x, pad.y, pad.r, 0, 6.283);
     // Dark glass with a bright rim: legible against dirt or a lit wall alike,
     // and still something you can see the lane through.
+    ctx.globalAlpha = dim ? 0.4 : 1;
     ctx.fillStyle = lit ? 'rgba(242,193,78,0.32)' : 'rgba(12,10,12,0.42)';
     ctx.fill();
     ctx.lineWidth = 2.5;
@@ -277,7 +247,6 @@ export function drawRotateHint() {
 }
 
 export function drawHud(game) {
-  crosshair(game);
   healthBlock(game);
   ammoBlock(game);
   waveBlock(game);
@@ -293,14 +262,15 @@ const KEYS = [
   ['ESPACO / MOUSE', 'atirar'],
   ['R', 'recarregar'],
   ['1 2 3 / E', 'fuzil, pistola, doze'],
+  ['F', 'subir na laje, na quina'],
   ['F1', 'mostrar a mecanica'],
 ];
 
 const THUMBS = [
   ['ANEL', 'andar - quanto mais longe, mais rapido'],
   ['ANEL NA BORDA', 'correr'],
-  ['BOTOES', 'tiro, carrega, agacha, arma, zoom'],
-  ['ZOOM', 'afasta a camera pro tiroteio longe'],
+  ['BOTOES', 'tiro, sobe, carrega, agacha, arma, zoom'],
+  ['SOBE', 'acende na quina da casa - vai pra laje'],
 ];
 
 export function drawTitle(game) {

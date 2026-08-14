@@ -7,7 +7,7 @@
 import {
   STANCES, STANCE_TIME, STANCE_ORDER, WEAPONS, BODY, HEALTH, SUPPRESSION, FEEL, AI, deg,
 } from './tuning.js';
-import { pushOutOfSolids } from './world.js';
+import { climbAt, roofSpan } from './world.js';
 
 let nextId = 1;
 
@@ -48,8 +48,8 @@ export function makeActor(opts) {
     sinceHit: 99,
     suppression: 0,
 
-    lean: 0,                       // 0 behind the corner, 1 shoulders past it
-    leanDir: 1,
+    y: 0,                          // where the feet are: 0 on the lane, up a roof
+    climb: null,                   // { from, to, t, dur } while on the wall
     aim: 0,                        // radians, positive is up
     intent: blankIntent(),
     anim: 'idle',
@@ -61,7 +61,10 @@ export function makeActor(opts) {
 }
 
 export function blankIntent() {
-  return { move: 0, run: false, stance: null, fire: false, reload: false, aimAt: null, swap: null };
+  return {
+    move: 0, run: false, stance: null, fire: false, reload: false,
+    aimAt: null, swap: null, climb: false,
+  };
 }
 
 export const stanceOf = (a) => STANCES[a.stance];
@@ -76,20 +79,18 @@ function blend(a, field) {
 }
 
 export const bodyHeight = (a) => blend(a, 'height');
-export const muzzleY = (a) => blend(a, 'muzzle');
 
 /**
- * Where the body actually is, corner lean included.
- *
- * Leaning is the only way past a corner in a lane you cannot walk around, so it
- * has to move the whole man and not just his gun: the hitbox, the muzzle and
- * the sprite all read this, which is what makes leaning out to shoot cost
- * exactly what it should.
+ * Everything vertical is measured from the feet, and the feet are not always on
+ * the ground. Climbing puts a man on a roof, and from there his muzzle, his
+ * hitbox and the cover between him and the lane all move up together.
  */
-export const posX = (a) => a.x + a.lean * FEEL.lean * a.leanDir;
-export const muzzleX = (a) => posX(a) + a.facing * 0.32;
-export const centre = (a) => bodyHeight(a) * 0.62;
-export const busy = (a) => a.change > 0 || a.hurt > 0 || !a.alive;
+export const muzzleY = (a) => a.y + blend(a, 'muzzle');
+export const posX = (a) => a.x;
+export const muzzleX = (a) => a.x + a.facing * 0.32;
+export const centre = (a) => a.y + bodyHeight(a) * 0.62;
+export const climbing = (a) => !!a.climb;
+export const busy = (a) => a.change > 0 || a.hurt > 0 || !a.alive || !!a.climb;
 
 export function setStance(a, want) {
   if (!STANCES[want] || want === a.want || !a.alive) return;
@@ -115,6 +116,31 @@ export function giveWeapon(a, name) {
   a.reloading = 0;
   a.bloom = 0;
   a.cooldown = Math.max(a.cooldown, 0.35);
+}
+
+/**
+ * Go up, or come down.
+ *
+ * A climb is only offered where the level says there is something to climb, and
+ * it always ends standing: the ride is fixed-length, unarmed and unstoppable,
+ * which is what makes going up on to a roof a decision rather than a dodge.
+ */
+export function tryClimb(a, game) {
+  if (a.climb || !a.alive || a.change > 0) return false;
+  const spot = climbAt(game.arena, a.x, a.y);
+  if (!spot) return false;
+  const up = a.y < spot.top - 0.01;
+  a.climb = {
+    from: a.y,
+    to: up ? spot.top : 0,
+    x: up ? spot.landing : spot.foot,
+    t: 0,
+    dur: up ? FEEL.climbUp : FEEL.climbDown,
+  };
+  a.x = up ? spot.foot : spot.landing;
+  setStance(a, 'stand');
+  a.change = 0;
+  return true;
 }
 
 export function startReload(a) {
@@ -213,7 +239,7 @@ export function damageActor(a, amount, from, game) {
 /** Which multiplier a hit at this height earns, scaled to the stance. */
 export function zoneAt(a, y) {
   const h = bodyHeight(a);
-  const f = y / h;
+  const f = (y - a.y) / h;
   if (f >= BODY.headBottom) return { mult: BODY.head, zone: 'head' };
   if (f <= BODY.legTop) return { mult: BODY.legs, zone: 'legs' };
   return { mult: BODY.torso, zone: 'torso' };
@@ -221,8 +247,10 @@ export function zoneAt(a, y) {
 
 /** The box a round has to cross to count as a hit. */
 export function hitbox(a) {
-  const x = posX(a);
-  return { x0: x - BODY.halfWidth, x1: x + BODY.halfWidth, y0: 0, y1: bodyHeight(a) };
+  return {
+    x0: a.x - BODY.halfWidth, x1: a.x + BODY.halfWidth,
+    y0: a.y, y1: a.y + bodyHeight(a),
+  };
 }
 
 function pickAnim(a) {
@@ -230,6 +258,7 @@ function pickAnim(a) {
   const moving = Math.abs(a.vx) > 0.15;
   const running = moving && Math.abs(a.vx) > s.walk * 1.25;
   if (!a.alive) return 'death';
+  if (a.climb) return 'climb';
   if (a.hurt > 0) return 'hit';
   if (a.heat < 0.22) return moving ? s.anim.moveFire : s.anim.fire;
   if (running) return s.anim.run;
@@ -250,6 +279,23 @@ export function updateActor(a, dt, game) {
   const s = STANCES[a.stance];
   const it = a.intent;
 
+  // --- climbing owns the body while it runs: no walking, no shooting, and a
+  // straight ride up the wall. Being on the ladder is the cost of the roof.
+  if (a.climb) {
+    a.climb.t += dt;
+    const k = Math.min(1, a.climb.t / a.climb.dur);
+    a.y = a.climb.from + (a.climb.to - a.climb.from) * k;
+    a.vx = 0;
+    a.anim = 'climb';
+    a.animT += dt;
+    if (k >= 1) {
+      a.y = a.climb.to;
+      a.x = a.climb.x;
+      a.climb = null;
+    }
+    return;
+  }
+
   a.change = Math.max(0, a.change - dt);
   a.hurt = Math.max(0, a.hurt - dt);
   a.sinceHit += dt;
@@ -260,6 +306,7 @@ export function updateActor(a, dt, game) {
 
   if (it.swap) { giveWeapon(a, it.swap); it.swap = null; }
   if (it.stance && it.stance !== a.want) setStance(a, it.stance);
+  if (it.climb) { it.climb = false; tryClimb(a, game); }
 
   // --- movement. Changing stance roots you; that is the cost of changing it.
   const top = (it.run && a.stance === 'stand' ? s.run : s.walk) * (a.change > 0 ? 0.15 : 1);
@@ -270,18 +317,11 @@ export function updateActor(a, dt, game) {
   a.x += a.vx * dt;
   a.x = Math.max(1, Math.min(game.arena.length - 1, a.x));
 
-  // Pressing into a corner you cannot walk through leans you out past it
-  // instead. Let go and you come back in. That is the whole peek: the same
-  // stick that walks you also puts your shoulders in the open.
-  const clamped = pushOutOfSolids(game.arena, a.x, BODY.halfWidth);
-  const blocked = clamped !== a.x;
-  a.x = clamped;
-  const pressing = blocked && Math.sign(it.move) === Math.sign(target) && it.move !== 0;
-  if (pressing) {
-    a.leanDir = Math.sign(it.move);
-    a.lean = Math.min(1, a.lean + dt / FEEL.leanOut);
-  } else {
-    a.lean = Math.max(0, a.lean - dt / FEEL.leanIn);
+  // A roof is a shelf you can walk along and fall off the end of, so a man up
+  // there is held to the span he climbed onto.
+  if (a.y > 0) {
+    const span = roofSpan(game.arena, a.y);
+    if (span) a.x = Math.max(span[0], Math.min(span[1], a.x));
   }
 
   a.step += Math.abs(a.vx) * dt;

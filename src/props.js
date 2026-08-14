@@ -251,14 +251,16 @@ export function paintHouse(spec) {
   for (let i = 1; i < 4; i++) g.fillRect((w * i / 4) * S, slabY, 0.02 * S, slabH * S);
 
   // On the roof: two vent pipes and the tank.
+  // Kept to the far end of the slab, because the near end is where a man
+  // climbing the corner puts his feet.
   const roof = total - bodyH;
-  for (const [px, ph, pw] of [[w * 0.55, 0.55, 0.14], [w * 0.62, 0.32, 0.08]]) {
+  for (const [px, ph, pw] of [[w * 0.40, 0.55, 0.14], [w * 0.47, 0.32, 0.08]]) {
     g.fillStyle = '#9a9384';
     g.fillRect(px * S, (roof - ph) * S, pw * S, ph * S);
     g.fillStyle = '#b4ad9d';
     g.fillRect((px - 0.03) * S, (roof - ph) * S, (pw + 0.06) * S, 0.06 * S);
   }
-  tank(g, S, w * 0.79, roof, 0.92, spec.tank);
+  tank(g, S, w * 0.22, roof, 0.92, spec.tank);
 
   // Sit it into the light the rest of the scene is lit by: a warm shade over
   // the whole thing, heaviest at the foot where the lane is already in shadow.

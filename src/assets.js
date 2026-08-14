@@ -47,11 +47,13 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
     jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
       .then((img) => { assets.caveirao = img; }));
   }
-  // Optional: real artwork for the house, if the manifest names any. Painted in
-  // props.js when it does not, so adding the entry is the whole of the change.
-  if (manifest.house) {
-    jobs.push(loadImage(`${base}/${manifest.house.file}`)
-      .then((img) => { assets.house = img; })
+  // Optional: real artwork for the house. The manifest can name it, or it can
+  // simply be dropped in at assets/props/casa.png -- either way the renderer
+  // prefers it over the painted one and nothing else has to change.
+  for (const file of [manifest.house?.file, 'props/casa.png', 'props/casa.webp']) {
+    if (!file) continue;
+    jobs.push(loadImage(`${base}/${file}`)
+      .then((img) => { assets.house = assets.house || img; })
       .catch(() => {}));
   }
 
@@ -78,6 +80,7 @@ export function charSpec(key) {
 // Not every character sheet carries every animation -- the gang sheets have no
 // walk-and-aim, for instance -- so each one names the pose to borrow instead.
 const FALLBACK = {
+  climb: 'walk',          // the drop has no climb frames; the gait stands in
   walkAim: 'shoot',
   shoot: 'idle',
   crouchShoot: 'crouch',

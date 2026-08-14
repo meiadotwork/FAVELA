@@ -71,10 +71,10 @@ function drawBody(a) {
   ];
   for (const [lo, hi, colour] of bands) {
     ctx.fillStyle = colour;
-    ctx.fillRect(x0, sy(h * hi), w, sy(h * lo) - sy(h * hi));
+    ctx.fillRect(x0, sy(a.y + h * hi), w, sy(a.y + h * lo) - sy(a.y + h * hi));
   }
   ctx.strokeStyle = a.player ? '#9fe8b0' : '#ff9a7a';
-  ctx.strokeRect(x0, sy(h), w, sy(0) - sy(h));
+  ctx.strokeRect(x0, sy(a.y + h), w, sy(a.y) - sy(a.y + h));
 
   // Muzzle height, which is the number cover is measured against.
   line(ctx, posX(a) - 0.6, muzzleY(a), posX(a) + 0.6, muzzleY(a), '#f2c14e');
@@ -94,7 +94,7 @@ function drawSightlines(game) {
     const b = a.brain;
     if (b) {
       const label = `${b.state}${b.up ? '^' : '_'} ${b.cover ? b.cover.kind : 'aberto'}`;
-      text(ctx, label, sx(posX(a)) - 22, sy(bodyHeight(a)) - 18, b.seen ? '#ffd08a' : '#8aa0b8');
+      text(ctx, label, sx(posX(a)) - 22, sy(a.y + bodyHeight(a)) - 18, b.seen ? '#ffd08a' : '#8aa0b8');
       if (b.cover) {
         line(ctx, b.hidePos, 0, b.hidePos, 0.5, '#5ad0ff');
         line(ctx, b.peekPos, 0, b.peekPos, 0.8, '#ffb45a');
@@ -125,7 +125,7 @@ function drawPanel(game) {
   const { ctx, H } = view;
   const p = game.player;
   const rows = [
-    `x        ${p.x.toFixed(2)} m   v ${p.vx.toFixed(2)} m/s  lean ${p.lean.toFixed(2)}`,
+    `x        ${p.x.toFixed(2)} m   v ${p.vx.toFixed(2)} m/s  pes ${p.y.toFixed(2)} m`,
     `stance   ${p.stance}${p.change > 0 ? ` -> ${p.want} ${(p.change * 1000) | 0}ms` : ''}`,
     `altura   ${bodyHeight(p).toFixed(2)} m   cano ${muzzleY(p).toFixed(2)} m`,
     `arma     ${p.weapon}  ${p.mag}/${p.reserve}  bloom ${p.bloom.toFixed(2)}`,

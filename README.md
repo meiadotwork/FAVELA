@@ -30,7 +30,7 @@ modules that both declare `ctx` at the top level still cannot collide.
 
 | | |
 |---|---|
-| Arrows / WASD | Move — and, pressed into the corner, lean out past it |
+| Arrows / WASD | Move |
 | Shift | Run |
 | ↓ | Crouch, then go prone |
 | ↑ | Stand back up |
@@ -38,13 +38,14 @@ modules that both declare `ctx` at the top level still cannot collide.
 | Mouse | Aim — move it and it takes over; leave it and the aim goes back to automatic |
 | R | Reload |
 | 1 2 3 / E | Rifle, pistol, shotgun |
+| F | Climb, at the foot of the far wall |
 | Z | Zoom the camera out and back |
 | C | Cycle stance · P Pause · M Mute |
 | F1 | Draw the mechanics |
 
 On touch there is a direction ring on the left and a row of buttons on the
-right — zoom, weapon, crouch, reload and the trigger, biggest and nearest the
-corner. The ring is analog: how far you push it is how fast you walk, and
+right — zoom, weapon, crouch, reload, climb and the trigger, biggest and nearest
+the corner. The climb button lights up only where there is something to climb. The ring is analog: how far you push it is how fast you walk, and
 pushing it to the rim is the run, which is why there is no run button. Anywhere
 on the left grabs the ring wherever your thumb lands, anywhere on the open right
 is also the trigger, and the black bars either side of the picture count as the
@@ -58,19 +59,25 @@ its own scale — the sheets are captioned 1.78 m at 110 px — so the simulatio
 written in real units and converted to pixels in exactly one place. A 4 m/s
 sprint is a sprint, and a 14 m shotgun range is a distance you can pace out.
 
-**The map is one house and one corner.** The building is set back and drawn
-behind you, and what actually stands in the lane is its corner: 0.9 m of wall at
-full height that stops everything and that nobody walks through. Everything
-arrives from up the lane, so the far side of that corner is safe ground and the
-near side is the fight. The door is 2 m, the man is 1.70 m, and every other
-measurement in the art and the simulation is stepped off those two.
+**The map is one house and one corner.** The building is drawn behind you and
+you walk straight past it; what stops bullets is its corner, 0.9 m of wall at
+full height that nothing clears at any stance. Everything arrives from up the
+lane, so the far side of that corner is safe ground and stepping past it is the
+price of taking a shot. There is no lean and no cover button: where you stand
+is whether you are covered.
 
-**Leaning is the whole peek.** You cannot walk around a corner in a lane that
-only has one dimension, so pressing into it leans you out instead: hold toward
-the corner and your shoulders come past it over about a quarter of a second,
-let go and they come back. The lean moves the body, not just the gun — hitbox,
-muzzle and sprite all read the same position — so being able to shoot and being
-able to be shot arrive together, which is the trade the whole map is built on.
+**The house measures the world.** The artwork states its own scale — the door is
+2 m, 467 px in the drawing — which puts the wall at 6.17 m, the roof slab 3.14 m
+up and the man beside it at 1.70 m. `assets.json` carries those metres and the
+level is built from them, so the corner, the cover height, the roof and the
+climb all follow from re-measuring the art and nothing else.
+
+**The roof is the other way to use the building.** A climb button at the foot of
+the far wall — the side the shooting is not coming from — puts you on the slab
+in a bit over a second, unarmed and unable to stop half way. Up there you can
+see and be seen by everything in the lane: height buys you sightlines and costs
+you the only cover on the map. The walkable stretch of slab is measured off the
+artwork too, so nobody ends up standing inside the water tank.
 
 **Stance is the other half.** Each stance sets four numbers: how tall your body
 is, how high your muzzle sits, how fast you move, and how steady you shoot.
@@ -83,8 +90,9 @@ body height is genuinely half-way too.
 **Aim finds what is exposed.** The shot is steered onto the nearest enemy the
 muzzle can actually reach, and the aim point is the highest-value part of him
 that is not behind something: centre mass if he is in the open, the head and
-shoulders if that is all that clears his wall. Heads take two and a half times
-damage, so peeking is expensive for both sides. Move the mouse and you take the
+shoulders if that is all that clears his cover. Heads take two and a half times
+damage. There is no crosshair — the shot is steered for you, so a reticle would
+only be telling you what the game already knows. Move the mouse and you take the
 aim over yourself; leave it alone and it goes back to automatic.
 
 **Weapons answer that geometry differently.** The rifle is the long gun: full
@@ -222,16 +230,15 @@ mostly noise bursts.
 
 ## The house
 
-The house is painted in `props.js` rather than loaded, because the reference for
-it arrived as a picture in a conversation and not as a file in the repository.
-It is drawn to the stated measurements — 2 m door, 5.6 m wall, 2.9 m to the roof
-slab, a 0.8 m tank on top — from brick, plaster fields with the render come away
-in patches, a louvred window, cobogo blocks, algae under the roof line and weeds
-at the footing.
+`assets/props/casa.webp` is the artwork, trimmed to its own edges, with its
+measurements in `assets.json` under `house.metres` — width, total height, the
+roof slab, the tank and the clear stretch of slab, all derived from the 2 m
+door by measuring the drawing rather than by eye.
 
-If the real artwork turns up, it wins: add it to `assets/props/` and name it in
-the manifest as `"house": {"file": "props/casa.webp"}`, and the renderer draws
-that instead, scaled to the same 5.6 m. Nothing else changes.
+`props.js` paints a stand-in to the same measurements if the file is ever
+missing, which is what the game ran on before the artwork arrived. Replacing the
+art means dropping in a new file and re-measuring it into the manifest; nothing
+in the level or the mechanics is written down twice.
 
 ## Not in this build
 
