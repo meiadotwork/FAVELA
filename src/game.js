@@ -51,6 +51,8 @@ function startLevel(levelIndex, playerKey) {
     bullets: [],
     particles: [],
     flashes: [],
+    fx: [],
+    fxMeta: assets.manifest.fx || {},
     camX: 0,
     shake: 0,
     time: 0,

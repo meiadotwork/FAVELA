@@ -11,6 +11,9 @@ export const assets = {
   sheets: {},      // character key -> Image
   buildings: [],   // houses, in manifest order
   walls: [],       // flat masonry panels, used to texture cover
+  cars: [],        // parked vehicles, used as cover
+  caveirao: null,  // the police armoured truck
+  fx: {},          // impact effects, by kind
 };
 
 function loadImage(src) {
@@ -36,6 +39,19 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
   (manifest.walls || []).forEach((b, i) => {
     jobs.push(loadImage(`${base}/${b.file}`).then((img) => { assets.walls[i] = img; }));
   });
+  (manifest.cars || []).forEach((c, i) => {
+    jobs.push(loadImage(`${base}/${c.file}`).then((img) => { assets.cars[i] = img; }));
+  });
+  if (manifest.caveirao) {
+    jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
+      .then((img) => { assets.caveirao = img; }));
+  }
+  for (const [kind, frames] of Object.entries(manifest.fx || {})) {
+    assets.fx[kind] = [];
+    frames.forEach((f, i) => {
+      jobs.push(loadImage(`${base}/${f.file}`).then((img) => { assets.fx[kind][i] = img; }));
+    });
+  }
 
   let done = 0;
   await Promise.all(jobs.map((p) => p.then(() => onProgress(++done / jobs.length))));

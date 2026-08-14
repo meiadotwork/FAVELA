@@ -37,6 +37,7 @@ export function drawWorld(ctx, world) {
 
   drawCovers(ctx, level, camX);
   drawBullets(ctx, world);
+  drawFx(ctx, world);
   drawParticles(ctx, world);
 
   ctx.restore();
@@ -93,8 +94,7 @@ function drawSkyline(ctx, level, camX) {
     const w = img.width * s.scale;
     const h = img.height * s.scale;
     if (s.x + w < camX * par - 240 || s.x > camX * par + W + 240) continue;
-    ctx.globalAlpha = 0.9;
-    ctx.drawImage(img, s.x, GROUND_Y - h - 96 + s.lift, w, h);
+    ctx.drawImage(img, s.x, s.base - h, w, h);
   }
   ctx.restore();
 
@@ -181,7 +181,7 @@ function drawProps(ctx, level, camX) {
 function drawCovers(ctx, level, camX) {
   for (const c of level.covers) {
     if (c.x1 < camX - 120 || c.x0 > camX + W + 120) continue;
-    if (c.kind === 'car') drawCar(ctx, c);
+    if (c.kind === 'car' || c.kind === 'truck') drawVehicle(ctx, c);
     else drawMasonry(ctx, c);
   }
 }
@@ -222,120 +222,23 @@ function drawMasonry(ctx, c) {
   ctx.strokeRect(c.x0, y, w, c.top);
 }
 
-const CAR_PAINT = [
-  ['#b9bcc0', '#6e7276'],   // faded silver
-  ['#d8d9d4', '#8d8e88'],   // dirty white
-  ['#8d3730', '#54211d'],   // oxidised red
-  ['#2f4a63', '#1b2c3d'],   // navy
-  ['#5d6b52', '#363f30'],   // olive
-  ['#8a6a3c', '#513e23'],   // beige, sun-bleached
-];
-
-/**
- * A beaten hatchback parked in the lane: bulletproof to the sill, glass above
- * it, exactly as the design notes call for. The sill line is the same number
- * the shooting model tests against, so what you see is what stops a round.
- */
-function drawCar(ctx, c) {
+/** A parked vehicle. The sprite is the cover: its sill is the line bullets stop at. */
+function drawVehicle(ctx, c) {
+  const img = c.kind === 'truck' ? assets.caveirao : assets.cars[c.art];
   const w = c.x1 - c.x0;
-  const x = c.x0;
-  const sill = GROUND_Y - c.gap[0];
-  const roof = GROUND_Y - c.gap[1];
-  const wheelY = GROUND_Y - 16;
-  // Cars in the lane are old and cheap: pick from paint a real one would wear,
-  // not a random hue, or it reads as a toy parked against photographic walls.
-  const [paint, dark] = CAR_PAINT[Math.floor(c.seed * CAR_PAINT.length) % CAR_PAINT.length];
+  if (!img) {
+    ctx.fillStyle = '#4a4a52';
+    ctx.fillRect(c.x0, GROUND_Y - c.top, w, c.top);
+    return;
+  }
+  const h = c.kind === 'truck' ? c.top / 0.98 : c.top / 0.60;
 
   ctx.save();
-  ctx.lineJoin = 'round';
-
-  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.fillStyle = 'rgba(0,0,0,.30)';
   ctx.beginPath();
-  ctx.ellipse(x + w / 2, GROUND_Y + 5, w * 0.5, 9, 0, 0, Math.PI * 2);
+  ctx.ellipse(c.x0 + w / 2, GROUND_Y + 4, w * 0.48, 9, 0, 0, Math.PI * 2);
   ctx.fill();
-
-  // Cabin: greenhouse tapering to the back, sitting on the sill.
-  ctx.fillStyle = dark;
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.20, sill + 2);
-  ctx.quadraticCurveTo(x + w * 0.30, roof, x + w * 0.46, roof);
-  ctx.lineTo(x + w * 0.70, roof);
-  ctx.quadraticCurveTo(x + w * 0.82, roof + 4, x + w * 0.86, sill + 2);
-  ctx.closePath();
-  ctx.fill();
-
-  // Glass: the band bullets pass through.
-  const glass = ctx.createLinearGradient(0, roof, 0, sill);
-  glass.addColorStop(0, 'rgba(196,224,232,.85)');
-  glass.addColorStop(1, 'rgba(96,132,150,.75)');
-  ctx.fillStyle = glass;
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.26, sill - 5);
-  ctx.quadraticCurveTo(x + w * 0.34, roof + 8, x + w * 0.47, roof + 8);
-  ctx.lineTo(x + w * 0.68, roof + 8);
-  ctx.quadraticCurveTo(x + w * 0.77, roof + 10, x + w * 0.81, sill - 5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = dark;
-  ctx.fillRect(x + w * 0.50, roof + 6, 6, sill - roof - 10);   // B pillar
-
-  // Body: the part that stops rounds.
-  const bodyGrad = ctx.createLinearGradient(0, sill, 0, wheelY);
-  bodyGrad.addColorStop(0, paint);
-  bodyGrad.addColorStop(0.55, paint);
-  bodyGrad.addColorStop(1, dark);
-  ctx.fillStyle = bodyGrad;
-  ctx.beginPath();
-  ctx.moveTo(x + 4, sill + 14);
-  ctx.quadraticCurveTo(x, sill + 2, x + w * 0.10, sill - 2);
-  ctx.lineTo(x + w * 0.90, sill - 2);
-  ctx.quadraticCurveTo(x + w, sill + 2, x + w - 4, sill + 14);
-  ctx.lineTo(x + w - 2, wheelY - 4);
-  ctx.quadraticCurveTo(x + w / 2, wheelY + 6, x + 2, wheelY - 4);
-  ctx.closePath();
-  ctx.fill();
-
-  // Sill highlight: the line that divides bulletproof from glass.
-  ctx.fillStyle = 'rgba(255,255,255,.20)';
-  ctx.fillRect(x + w * 0.06, sill - 3, w * 0.88, 3);
-  ctx.fillStyle = 'rgba(0,0,0,.20)';
-  ctx.fillRect(x + w * 0.06, sill + 1, w * 0.88, 2);
-
-  // Rust, a door seam, and lights.
-  ctx.fillStyle = 'rgba(120,70,30,.28)';
-  ctx.fillRect(x + w * (0.12 + c.seed * 0.5), sill + 22, w * 0.14, 16);
-  ctx.strokeStyle = 'rgba(0,0,0,.35)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x + w * 0.52, sill + 4);
-  ctx.lineTo(x + w * 0.52, wheelY - 12);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255,224,150,.75)';
-  ctx.fillRect(x + w - 12, sill + 12, 9, 10);
-  ctx.fillStyle = 'rgba(210,70,50,.8)';
-  ctx.fillRect(x + 3, sill + 12, 8, 10);
-
-  // Wheels, tucked into arches.
-  for (const t of [0.23, 0.79]) {
-    const cx = x + w * t;
-    ctx.fillStyle = '#15161a';
-    ctx.beginPath();
-    ctx.arc(cx, wheelY, 20, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(185,188,195,.55)';
-    ctx.beginPath();
-    ctx.arc(cx, wheelY, 8, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = 'rgba(18,16,14,.55)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(x + 4, sill + 14);
-  ctx.quadraticCurveTo(x, sill + 2, x + w * 0.10, sill - 2);
-  ctx.lineTo(x + w * 0.90, sill - 2);
-  ctx.quadraticCurveTo(x + w, sill + 2, x + w - 4, sill + 14);
-  ctx.stroke();
+  ctx.drawImage(img, c.x0, GROUND_Y - h, w, h);
   ctx.restore();
 }
 
@@ -404,6 +307,23 @@ function drawBullets(ctx, world) {
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function drawFx(ctx, world) {
+  for (const e of world.fx) {
+    const frames = assets.fx[e.kind];
+    if (!frames || !frames.length) continue;
+    const i = Math.min(frames.length - 1, Math.floor(e.t * e.fps));
+    const img = frames[i];
+    if (!img) continue;
+    const meta = assets.manifest.fx[e.kind][i];
+    ctx.save();
+    ctx.globalAlpha = e.fade ? Math.max(0, Math.min(1, e.fade - e.t * 0.02)) : 1;
+    // Bursts sit centred on the impact; a pool spreads on the ground below it.
+    const y = e.ground ? GROUND_Y - meta.h * 0.75 : e.y - meta.h / 2;
+    ctx.drawImage(img, e.x - meta.w / 2, y, meta.w, meta.h);
+    ctx.restore();
+  }
 }
 
 function drawParticles(ctx, world) {

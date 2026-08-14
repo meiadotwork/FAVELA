@@ -376,9 +376,217 @@ def main(raw, out_dir, houses=32, walls=10):
     for key, spec in MANIFEST.items():
         manifest['characters'][key] = build_character(key, spec, raw, out_dir)
     manifest['buildings'], manifest['walls'] = build_buildings(raw, out_dir, houses, walls)
+    manifest['cars'], manifest['caveirao'] = build_vehicles(raw, out_dir)
+    manifest['fx'] = build_fx(raw, out_dir)
     with open(os.path.join(out_dir, 'assets.json'), 'w') as f:
         json.dump(manifest, f, separators=(',', ':'))
     print('wrote', os.path.join(out_dir, 'assets.json'))
+
+
+
+
+# ---------------------------------------------------------------- props
+#
+# The second art drop added vehicles and impact effects, and it documents its
+# own scale: the character sheets are labelled "1.78 m - 110 px", and every
+# effect states how many metres it covers. So props are sized from real
+# dimensions rather than eyeballed, which keeps a car parked next to a man the
+# size a car actually is.
+
+PX_PER_M = STAND_H / 1.78
+
+CARS = {
+    'Photo Aug 13 2026, 6 17 02 PM.png': 4.4,           # square-back wagon
+    'Photo Aug 13 2026, 6 17 08 PM (1).png': 3.6,       # small hatch
+    'Photo Aug 13 2026, 6 17 08 PM.png': 3.7,           # red hatch
+    'Photo Aug 13 2026, 7 17 59 PM (1).png': 4.1,       # blue saloon
+    'Photo Aug 13 2026, 7 17 59 PM (2).png': 3.7,       # two-tone hatch
+    'Photo Aug 13 2026, 7 17 59 PM.png': 4.6,           # long black coupe
+}
+CAVEIRAO = 'Photo Aug 13 2026, 7 17 59 PM (3).png'
+CAVEIRAO_M = 6.1
+FX_SHEET = 'Photo Aug 13 2026, 7 17 59 PM (4).png'
+# Row order, frame count and real width, as printed on the sheet itself.
+FX_ROWS = [('concrete', 5, 0.5), ('metal', 4, 0.4), ('dirt', 5, 0.6), ('pool', 4, 1.2)]
+
+
+def trim_alpha(im, cut=32):
+    """Crop to the visible pixels. Soft effects need a lower threshold than
+    solid props, or the faint tail frames of a spark burst trim away to nothing."""
+    a = np.asarray(im)[:, :, 3] > cut
+    if not a.any():
+        return None
+    ys, xs = np.where(a)
+    return im.crop((int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1))
+
+
+def bands(mask, gap=10, min_h=20):
+    """Vertical runs of content separated by at least `gap` blank rows."""
+    rows = mask.any(axis=1)
+    out, start, blank = [], None, 0
+    for i, v in enumerate(rows):
+        if v:
+            if start is None:
+                start = i
+            blank = 0
+        elif start is not None:
+            blank += 1
+            if blank >= gap:
+                if i - blank - start >= min_h:
+                    out.append((start, i - blank + 1))
+                start = None
+    if start is not None and len(rows) - start >= min_h:
+        out.append((start, len(rows)))
+    return out
+
+
+def build_vehicles(raw, out_dir):
+    """Cars and the police caveirao, scaled from their real length."""
+    src = os.path.join(raw, 'Props')
+    os.makedirs(os.path.join(out_dir, 'props'), exist_ok=True)
+    cars = []
+    for i, (name, metres) in enumerate(sorted(CARS.items())):
+        im = trim_alpha(Image.open(os.path.join(src, name)).convert('RGBA'))
+        if im is None:
+            continue
+        f = scaled(im, metres * PX_PER_M / im.width)
+        fn = f'props/car{i}.webp'
+        f.save(os.path.join(out_dir, fn), quality=WEBP_Q, method=5)
+        cars.append({'file': fn, 'w': f.width, 'h': f.height})
+
+    # The caveirao sheet is a grid of near-identical renders; one is enough.
+    # It goes through the sprite slicer rather than a plain projection, because
+    # the trucks sit close enough that a blank-gutter cut runs two together.
+    im, boxes = slice_sheet(os.path.join(src, CAVEIRAO))
+    best = None
+    for b in boxes:
+        cell = im.crop(b)
+        # A caveirao is about twice as long as it is tall; anything much wider
+        # than that is two of them that failed to come apart.
+        if not 1.6 <= cell.width / cell.height <= 2.9:
+            continue
+        if best is None or cell.width * cell.height > best.width * best.height:
+            best = cell
+    truck = None
+    if best is not None:
+        f = scaled(best, CAVEIRAO_M * PX_PER_M / best.width)
+        f.save(os.path.join(out_dir, 'props/caveirao.webp'), quality=WEBP_Q, method=5)
+        truck = {'file': 'props/caveirao.webp', 'w': f.width, 'h': f.height}
+
+    print(f'  vehicles: {len(cars)} cars' + (', caveirao' if truck else ''))
+    return cars, truck
+
+
+def cell_spans(band_mask, gap=8):
+    """Horizontal runs of content inside one band."""
+    cols = band_mask.any(axis=0)
+    out, start, blank = [], None, 0
+    for i, v in enumerate(cols):
+        if v:
+            if start is None:
+                start = i
+            blank = 0
+        elif start is not None:
+            blank += 1
+            if blank >= gap:
+                out.append((start, i - blank + 1))
+                start = None
+    if start is not None:
+        out.append((start, len(cols)))
+    return [(a, b) for a, b in out if b - a > 12]
+
+
+def rule_positions(box_mask):
+    """Centres of the drawn dividers in a ruled box, along its width.
+
+    A divider is an unbroken line from the top rule to the bottom one, which is
+    what separates it from a column of dense smoke: the effects reach the same
+    total coverage in places, but only a drawn rule is continuous over the full
+    height and only a few pixels wide.
+    """
+    h = box_mask.shape[0]
+    filled = box_mask.cumsum(axis=0)
+    del filled
+    runs = np.zeros(box_mask.shape[1], int)
+    current = np.zeros(box_mask.shape[1], int)
+    for row in box_mask:
+        current = np.where(row, current + 1, 0)
+        runs = np.maximum(runs, current)
+
+    hits = np.where(runs >= h * 0.95)[0]
+    if not len(hits):
+        return []
+    groups, run = [], [hits[0]]
+    for v in hits[1:]:
+        if v - run[-1] <= 3:
+            run.append(v)
+        else:
+            groups.append(run)
+            run = [v]
+    groups.append(run)
+    return [float(np.mean(g)) for g in groups if len(g) <= 6]
+
+
+def build_fx(raw, out_dir):
+    """Impact effects, cut from the labelled contact sheet.
+
+    Each row is drawn inside a ruled box and captioned with its frame count and
+    the width it covers in metres, so the cells are taken by dividing the box
+    evenly and the result is scaled to that real width. The rule lines are
+    inset away before trimming, or every frame would carry a slice of border.
+    """
+    im = Image.open(os.path.join(raw, 'Props', FX_SHEET)).convert('RGBA')
+    mask = np.asarray(im)[:, :, 3] > 32
+    os.makedirs(os.path.join(out_dir, 'fx'), exist_ok=True)
+
+    # Keep the tall bands: the captions above each box are thin strips.
+    found = [b for b in bands(mask, gap=6, min_h=60)]
+    out = {}
+    for (name, count, metres), (y0, y1) in zip(FX_ROWS, found):
+        # The widest run is the ruled box holding the frames. Narrow runs to
+        # its right are the caption ("cell: 448 x 448 px"), which sits inside
+        # the band on the shorter rows and would otherwise stretch the grid.
+        spans = cell_spans(mask[y0:y1], gap=4)
+        x0, x1 = max(spans, key=lambda s: s[1] - s[0])
+
+        # The band also holds the row's caption, which sits above the box and
+        # overlaps the first and last cells. The box is drawn as a rectangle,
+        # so its horizontal rules are the rows that run nearly its full width;
+        # taking the first and last of those crops the caption away.
+        cover = mask[y0:y1, x0:x1].sum(axis=1)
+        rules = np.where(cover > (x1 - x0) * 0.6)[0]
+        top = y0 + (int(rules[0]) if len(rules) else 0)
+        bot = y0 + (int(rules[-1]) if len(rules) else y1 - y0)
+
+        # Cells are not evenly spaced on every row -- the final blood pool is
+        # drawn wider than the ones before it -- so the dividers are read off
+        # the sheet the same way: columns that run the full height of the box.
+        edges = rule_positions(mask[top:bot, x0:x1])
+        if len(edges) != count + 1:
+            step = (x1 - x0) / count
+            edges = [i * step for i in range(count + 1)]
+        cells = []
+        for i in range(count):
+            box = (x0 + int(edges[i]) + 6, top + 5, x0 + int(edges[i + 1]) - 6, bot - 4)
+            cell = trim_alpha(im.crop(box), cut=8)
+            if cell is not None:
+                cells.append(cell)
+        if not cells:
+            continue
+
+        # One scale for the whole row, taken from its widest frame against the
+        # width the caption states. Scaling frames individually would flatten
+        # the animation: a spatter that grows would play back all one size.
+        factor = metres * PX_PER_M / max(c.width for c in cells)
+        frames = []
+        for i, cell in enumerate(cells):
+            f = scaled(cell, factor)
+            fn = f'fx/{name}{i}.webp'
+            f.save(os.path.join(out_dir, fn), quality=WEBP_Q, method=5)
+            frames.append({'file': fn, 'w': f.width, 'h': f.height})
+        out[name] = frames
+    print('  fx: ' + ', '.join(f'{k} x{len(v)}' for k, v in out.items()))
+    return out
 
 
 if __name__ == '__main__':

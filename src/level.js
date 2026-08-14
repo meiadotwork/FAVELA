@@ -17,7 +17,8 @@ export const STAND_H = 190;
 export const COVER = {
   wall: { top: 0.52, label: 'muro' },
   crate: { top: 0.40, label: 'caixa' },
-  car: { top: 0.55, gap: [0.55, 0.95], label: 'carro' },
+  car: { top: 0.55, gap: [0.55, 0.95], label: 'carro' },   // sized from its sprite
+  truck: { top: 2.60, label: 'caveirão' },                 // armoured, solid throughout
   corner: { top: 2.20, label: 'quina' },
 };
 
@@ -95,17 +96,20 @@ export function buildLevel(index, playerKey) {
   const ladders = [];
   const props = [];
 
-  // Distant hillside: small, desaturated, scrolls slowly.
+  // The hillside behind the lane. Houses are packed tightly enough to overlap
+  // into one mass, and the smaller they are the higher they sit, so the stack
+  // reads as a slope climbing away rather than as props floating in the sky.
   const skyline = [];
-  for (let x = -240; x < def.width + 400; x += range(rng, 74, 128)) {
+  for (let x = -240; x < def.width + 400; x += range(rng, 46, 86)) {
+    const scale = range(rng, 0.22, 0.42);
     skyline.push({
       img: Math.floor(rng() * nBuildings),
       x,
-      scale: range(rng, 0.16, 0.28),
-      lift: range(rng, -90, 40),
+      scale,
+      base: GROUND_Y - (8 + (0.42 - scale) * 620) - range(rng, 0, 40),
     });
   }
-  skyline.sort((a, b) => a.scale - b.scale);   // smallest sit furthest up the hill
+  skyline.sort((a, b) => a.scale - b.scale);   // furthest up the hill drawn first
 
   // The row of houses the lane runs along. Gaps between them are empty lots.
   let x = -120;
@@ -147,6 +151,12 @@ export function buildLevel(index, playerKey) {
     if (rng() < 0.45) {
       addCover(covers, makeCover(rng() < 0.5 ? 'wall' : 'crate', x - range(rng, 120, 260), rng));
     }
+  }
+
+  // On a police level the caveirao is parked in the alley: the raid's own
+  // vehicle, and the one piece of cover nothing shoots through.
+  if (def.enemy === 'police' || def.enemy === 'mixed') {
+    addCover(covers, makeCover('truck', def.width * range(rng, 0.55, 0.75), rng));
   }
 
   // No stretch of the lane should be a killing field with nothing to hide
@@ -203,16 +213,35 @@ function addCover(covers, cover) {
 
 function makeCover(kind, x, rng, house = null) {
   const spec = COVER[kind];
-  const w = kind === 'car' ? range(rng, 200, 240)
-    : kind === 'corner' ? range(rng, 54, 84)
-      : range(rng, 130, 200);
+
+  // Vehicles take their geometry from the sprite that will be drawn, so the
+  // line bullets stop at is the line the player can see on the bodywork.
+  if (kind === 'car' || kind === 'truck') {
+    const pool = kind === 'truck' ? [assets.manifest.caveirao] : assets.manifest.cars;
+    const idx = Math.floor(rng() * pool.length);
+    const art = pool[idx];
+    if (art) {
+      return {
+        kind,
+        x0: x,
+        x1: x + art.w,
+        // Solid to the window sill; the caveirao is armoured all the way up.
+        top: art.h * (kind === 'truck' ? 0.98 : 0.60),
+        gap: kind === 'truck' ? null : [art.h * 0.60, art.h * 0.97],
+        art: idx,
+        seed: rng(),
+      };
+    }
+  }
+
+  const w = kind === 'corner' ? range(rng, 54, 84) : range(rng, 130, 200);
   const top = STAND_H * spec.top * (kind === 'corner' ? range(rng, 0.9, 1.25) : range(rng, 0.94, 1.06));
   return {
     kind,
     x0: x,
     x1: x + w,
     top,
-    gap: spec.gap ? [STAND_H * spec.gap[0], STAND_H * spec.gap[1]] : null,
+    gap: null,
     // Corners are a slice of the house they belong to; loose cover is built
     // from the flat masonry panels, so a wall in the street is real brickwork.
     house: house ? house.img : null,

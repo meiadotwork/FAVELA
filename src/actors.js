@@ -174,6 +174,8 @@ export function updateBullets(world, dt) {
 
     const hit = blockedBy(level, b.x, b.y, nx, ny);
     if (hit) {
+      const metal = hit.cover.kind === 'car' || hit.cover.kind === 'truck';
+      addFx(world, metal ? 'metal' : 'concrete', hit.x, hit.y);
       spark(world, hit.x, hit.y, -Math.sign(b.vx));
       sfxImpact(Math.abs(hit.x - world.camX - 640));
       b.life = 0;
@@ -207,6 +209,7 @@ export function updateBullets(world, dt) {
     b.vy += 240 * dt;                                  // a little drop over range
     b.life -= dt;
     if (b.y > GROUND_Y) {
+      addFx(world, 'dirt', b.x, GROUND_Y);
       spark(world, b.x, GROUND_Y, -Math.sign(b.vx));
       b.life = 0;
     }
@@ -231,12 +234,32 @@ export function damage(world, a, amount, dir = 1) {
     a.animName = 'death';
     a.animTime = 0;
     a.facing = dir < 0 ? 1 : -1;
+    // The pool spreads under the body and stays for the rest of the level.
+    addFx(world, 'pool', a.x, GROUND_Y, { ground: true, fps: 3.2, keep: true });
     sfxDeath();
     world.onDeath?.(a);
   } else {
     a.stagger = 0.22;
     sfxHit();
   }
+}
+
+/**
+ * Start an impact effect. These are drawn from the FX sheet in the art drop,
+ * which states what each one covers in metres, so they are already the right
+ * size against a body -- no tuning, just play them.
+ */
+export function addFx(world, kind, x, y, opts = {}) {
+  const frames = world.fxMeta?.[kind];
+  if (!frames || !frames.length) return;
+  world.fx.push({
+    kind, x, y,
+    t: 0,
+    fps: opts.fps ?? 22,
+    ground: !!opts.ground,
+    keep: !!opts.keep,
+    life: frames.length / (opts.fps ?? 22),
+  });
 }
 
 function spark(world, x, y, dir, color = '#ffd27a') {
@@ -503,6 +526,10 @@ function burstReady(a, dt) {
 }
 
 export function updateParticles(world, dt) {
+  for (const e of world.fx) e.t += dt;
+  // Bursts clear once played; blood pools hold on their last frame.
+  world.fx = world.fx.filter((e) => e.keep || e.t < e.life);
+
   for (const p of world.particles) {
     p.life -= dt;
     p.x += p.vx * dt;
