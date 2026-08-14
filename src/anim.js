@@ -15,7 +15,7 @@
 // Nothing here knows about the game: it takes a character key and a clip name
 // and gives back a frame. The controller in lab/body.js decides which clip.
 
-import { anim, frameAt } from './assets.js';
+import { anim } from './assets.js';
 
 /**
  * The clip table.
@@ -24,6 +24,9 @@ import { anim, frameAt } from './assets.js';
  *   loop     restart at the end, or hold the last frame
  *   from     which sheet animation the frames come from, when the clip is not
  *            an animation in its own right (a fall is one frame of a run)
+ *   range    [first, last] of the sheet animation to use, inclusive -- the
+ *            firing rows on the sheet open with the rifle down at the hip and
+ *            raise it over a frame or two, which is a lead-in, not a loop
  *   frame    pin to a single frame of `from`, for held poses
  *   stride   px of ground travel per frame -- set, and the clip is stepped by
  *            distance instead of by time
@@ -40,9 +43,22 @@ export const CLIPS = {
   prone: { fps: 6, loop: true, stride: 9 },
   proneCrawl: { fps: 8, loop: true, stride: 9, from: 'proneCrawl' },
 
-  shoot: { fps: 17, loop: false, priority: 1, then: 'idle', events: { 0: 'muzzle' } },
-  crouchShoot: { fps: 17, loop: false, priority: 1, then: 'crouch', events: { 0: 'muzzle' } },
-  proneShoot: { fps: 17, loop: false, priority: 1, then: 'prone', events: { 0: 'muzzle' } },
+  // Firing loops the frames with the rifle up and shouldered. The frames where
+  // it is still coming up belong to the moment the gun is raised, not to every
+  // round: played on each shot, they are all you ever see, and the character
+  // spends a firefight lowering his weapon.
+  shoot: {
+    fps: 17, loop: false, range: [2, 4], priority: 1, then: 'idle',
+    events: { 0: 'muzzle' },
+  },
+  crouchShoot: {
+    fps: 17, loop: false, range: [2, 5], priority: 1, then: 'crouch',
+    events: { 0: 'muzzle' },
+  },
+  proneShoot: {
+    fps: 17, loop: false, range: [1, 6], priority: 1, then: 'prone',
+    events: { 0: 'muzzle' },
+  },
 
   // The sheet has no ladder or stair cycle, so the climb is the walk played
   // slower -- a body taking one step per tread rather than per stride.
@@ -63,10 +79,25 @@ export function clipOf(name) {
   return CLIPS[name] || CLIPS.idle;
 }
 
-/** Frames a clip resolves to on a given character, after sheet fallbacks. */
+const resolved = new Map();
+
+/**
+ * Frames a clip resolves to on a given character: the sheet animation it names
+ * (after that sheet's own fallbacks), cut to the clip's range.
+ *
+ * Cached, because this is asked for several times a frame and slicing a range
+ * would otherwise allocate a new array every time.
+ */
 export function clipFrames(key, name) {
-  const clip = clipOf(name);
-  return anim(key, clip.from || name);
+  const id = `${key}:${name}`;
+  let frames = resolved.get(id);
+  if (!frames) {
+    const clip = clipOf(name);
+    frames = anim(key, clip.from || name);
+    if (clip.range) frames = frames.slice(clip.range[0], clip.range[1] + 1);
+    resolved.set(id, frames);
+  }
+  return frames;
 }
 
 export class Animator {
@@ -100,7 +131,7 @@ export class Animator {
     const i = Math.floor(this.index);
     if (clip.frame != null) return frames[Math.min(clip.frame, frames.length - 1)];
     if (!clip.loop) return frames[Math.max(0, Math.min(i, frames.length - 1))];
-    return frameAt(this.key, clip.from || this.name, i);
+    return frames[((i % frames.length) + frames.length) % frames.length];
   }
 
   /**
