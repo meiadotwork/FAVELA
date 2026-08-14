@@ -165,22 +165,3 @@ function chooseClip(a) {
   if (a.moving) return a.anim.play(a.cooldown > 0 || a.reload > 0 ? 'walkAim' : (a.running ? 'run' : 'walk'));
   return a.anim.play('idle');
 }
-
-export function hurt(body, amount = 26) {
-  if (body.dead) return;
-  body.hp = Math.max(0, body.hp - amount);
-  if (body.hp <= 0) {
-    body.dead = true;
-    body.anim.play('death', { restart: true });
-  } else {
-    body.anim.play('hit', { restart: true });
-  }
-}
-
-export function revive(body) {
-  body.dead = false;
-  body.hp = 100;
-  body.ammo = WEAPONS[body.weapon].mag;
-  body.reload = 0;
-  body.anim.play('idle', { restart: true });
-}

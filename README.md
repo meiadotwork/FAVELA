@@ -38,10 +38,11 @@ python3 -m http.server 8080
 # then http://localhost:8080/mecanica.html
 ```
 
-It fills the window, every action is on a labelled button, and the panel on the
-right lists every animation on the sheet so any of them can be played, frozen
-and stepped a frame at a time. The readout on the left says which clip is
-running, which frame it is on, what the body is standing on and where it is
+It fills the window and every action is on a labelled button: walk, run, stand
+up, crouch and go prone, fire. The panel on the right lists every animation on
+the sheet, and clicking one pins it so it can be watched on its own; clicking it
+again hands the body back its own judgement. Three lines in the corner say which
+animation is running, which posture the body is in, and where it is standing
 relative to the house.
 
 What it is for:
@@ -59,12 +60,13 @@ What it is for:
   drawn *in front of* the body: standing behind the wall really does hide you,
   and you cannot shoot out of it either — step to the corner or into a doorway,
   which is a hole in the wall that bullets go through.
-- **Fast bullets.** A round crosses the lane in about a fifth of a second and
-  most of them leave nothing behind; only some carry a short tracer, and the
-  button cycles that between some, all and none.
+- **Fast bullets.** A round crosses the lane in about a fifth of a second, is
+  tested as a segment rather than at a point, and mostly leaves nothing behind:
+  about one in four carries a short tracer.
 
-Buttons also swap the ground and the house, and switch on an overlay showing
-every surface, the wall band, the doorways and the body's own box.
+There are boards to shoot at, and nothing else. The rest — swapping the ground
+and the house, damage, a collision overlay — is left until there is a reason for
+it: the manifest already holds four ground strips, four flights and six houses.
 
 ## Controls
 

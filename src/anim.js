@@ -82,9 +82,7 @@ export class Animator {
     this.index = 0;         // frame index, ahead of wrapping
     this.speed = 1;
     this.done = false;
-    this.frozen = false;    // held still by the inspector
     this.fired = -1;        // last frame index whose events have gone off
-    this.loops = 0;
   }
 
   get clip() {
@@ -103,12 +101,6 @@ export class Animator {
     if (clip.frame != null) return frames[Math.min(clip.frame, frames.length - 1)];
     if (!clip.loop) return frames[Math.max(0, Math.min(i, frames.length - 1))];
     return frameAt(this.key, clip.from || this.name, i);
-  }
-
-  /** Where the playhead sits, 0..1 -- what the inspector's scrubber shows. */
-  get progress() {
-    const n = this.frames.length;
-    return n ? ((this.index % n) + n) % n / n : 0;
   }
 
   /**
@@ -142,7 +134,6 @@ export class Animator {
     this.index = 0;
     this.done = false;
     this.fired = -1;
-    this.loops = 0;
     this.fire(0);
   }
 
@@ -154,7 +145,6 @@ export class Animator {
    *                          clip with a stride is stepped by this instead
    */
   update(dt, distance = 0) {
-    if (this.frozen) return;
     const clip = this.clip;
     const frames = this.frames;
     if (!frames.length) return;
@@ -182,19 +172,9 @@ export class Animator {
         if (clip.then) this.play(clip.then);
       }
     } else if (clip.loop && this.index >= frames.length) {
-      this.loops++;
       this.index -= frames.length;
       this.fired = -1;
     }
-  }
-
-  /** Step one frame on, for the inspector's frame-by-frame button. */
-  step(delta = 1) {
-    const frames = this.frames;
-    if (!frames.length) return;
-    this.index = (Math.floor(this.index) + delta + frames.length) % frames.length;
-    this.time = this.index / (this.clip.fps || 1);
-    this.done = false;
   }
 
   fire(index) {

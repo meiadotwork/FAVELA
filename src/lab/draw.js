@@ -7,8 +7,7 @@
 // wall as a faint silhouette, the way a 2D game shows what it has hidden.
 
 import { assets, drawFrame } from '../assets.js';
-import { GROUND_Y, TARGET, targetBox, stairSurface } from './stage.js';
-import { poseHeight, muzzleX, muzzleY, stanceOf } from './body.js';
+import { GROUND_Y, TARGET, targetBox } from './stage.js';
 import { TRACER_LIFE, TRACER_LEN } from './shots.js';
 
 export const VIEW_H = 1000;        // world px visible top to bottom
@@ -25,7 +24,7 @@ export function viewport(canvas, cam) {
   };
 }
 
-export function drawStage(ctx, canvas, stage, body, shots, cam, opts = {}) {
+export function drawStage(ctx, canvas, stage, body, shots, cam) {
   const view = viewport(canvas, cam);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -55,7 +54,6 @@ export function drawStage(ctx, canvas, stage, body, shots, cam, opts = {}) {
   else if (body.cover === 'behind') drawGhost(ctx, body, stage);
 
   drawShots(ctx, shots);
-  if (opts.debug) drawDebug(ctx, stage, body, view);
 
   ctx.restore();
   return view;
@@ -222,48 +220,5 @@ function drawShots(ctx, shots) {
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x, p.y, p.size, p.size);
   }
-  ctx.restore();
-}
-
-// --------------------------------------------------------------- debug
-
-const COVER_COLOR = {
-  open: '#6fbf5e', corner: '#f2c14e', behind: '#4aa3df', door: '#c86fd8', roof: '#d8483f',
-};
-
-function drawDebug(ctx, stage, body, view) {
-  ctx.save();
-  ctx.lineWidth = 2;
-
-  // Walkable surfaces.
-  ctx.strokeStyle = 'rgba(111,191,94,.9)';
-  ctx.beginPath();
-  ctx.moveTo(view.x, GROUND_Y);
-  ctx.lineTo(view.x + view.w, GROUND_Y);
-  ctx.stroke();
-
-  const s = stage.stairs;
-  ctx.strokeStyle = 'rgba(242,193,78,.95)';
-  ctx.beginPath();
-  for (let x = s.x0; x <= s.x1; x += 6) {
-    const y = stairSurface(s, x);
-    if (x === s.x0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.stroke();
-
-  const h = stage.house;
-  ctx.strokeStyle = 'rgba(216,72,63,.95)';
-  ctx.strokeRect(h.x0, h.roofY, h.x1 - h.x0, GROUND_Y - h.roofY);
-  ctx.fillStyle = 'rgba(200,111,216,.35)';
-  for (const [a, b] of h.doors) ctx.fillRect(a, h.roofY, b - a, GROUND_Y - h.roofY);
-
-  // The body's own box, anchor and muzzle.
-  const st = stanceOf(body);
-  ctx.strokeStyle = COVER_COLOR[body.cover] || '#fff';
-  ctx.strokeRect(body.x - st.width / 2, body.y - poseHeight(body), st.width, poseHeight(body));
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(body.x - 2, body.y - 2, 4, 4);
-  ctx.fillStyle = '#ffd27a';
-  ctx.fillRect(muzzleX(body) - 3, muzzleY(body) - 3, 6, 6);
   ctx.restore();
 }

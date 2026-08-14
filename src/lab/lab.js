@@ -1,30 +1,28 @@
 // FAVELA -- bancada de mecânicas.
 //
 // Not a game: one character, one street, one single-storey house, and every
-// action the sheet can draw, laid out where they can be looked at. What is
-// being tested here, in order:
+// action the sheet can draw. What is being tested here:
 //
 //   * the animation machinery in anim.js -- clips, events, priorities, and a
 //     walk cycle stepped by distance travelled rather than by the clock;
 //   * the three postures and the moves between them;
-//   * climbing: walking up a flight of stairs onto the roof of the house, and
-//     falling off the other side;
+//   * climbing: walking up a flight of stairs onto the roof, and falling off;
 //   * the cover corner from the design notes -- the house stands in the
 //     player's own layer, so its wall is something to hide behind and step out
 //     of, and its doorway is a hole to shoot through;
 //   * shooting: rounds that cross the lane in a fifth of a second, and only
 //     sometimes leave a tracer behind them.
 //
-// The whole stage is one screen wide and everything is on a labelled button.
+// Everything is on a labelled button, and there is nothing else on the screen.
 
-import { loadAssets, assets } from '../assets.js';
+import { loadAssets } from '../assets.js';
 import { initKeyboard, input, endFrame, consume } from '../input.js';
-import { initAudio, resumeAudio, sfxShot, sfxImpact, sfxHit, sfxDeath } from '../audio.js';
+import { initAudio, resumeAudio, sfxShot } from '../audio.js';
 import { buildStage } from './stage.js';
-import { makeBody, updateBody, hurt, revive, muzzleX, muzzleY } from './body.js';
-import { makeShots, updateShots, fire, TRACER_MODES } from './shots.js';
+import { makeBody, updateBody, muzzleX, muzzleY } from './body.js';
+import { makeShots, updateShots, fire } from './shots.js';
 import { drawStage } from './draw.js';
-import { initPad, initClipList, initToggle, tracerLabel, readout } from './ui.js';
+import { initPad, initClipList, readout } from './ui.js';
 
 const CHARACTER = 'p1';       // "chose one caracter": Branco, o do fuzil
 
@@ -35,10 +33,8 @@ const lab = {
   stage: null,
   body: null,
   shots: makeShots(),
-  cam: { x: 0, y: 0 },
-  debug: false,
-  locked: null,               // clip held by the inspector, or null for automatic
-  fps: 60,
+  cam: { x: 0 },
+  locked: null,               // clip pinned from the list, or null for automatic
   chips: null,
 };
 
@@ -87,41 +83,18 @@ function buildControls() {
   initPad();
 
   lab.chips = initClipList(lab.body, (name) => {
-    // Picking a clip pins it; picking it again hands the body back its own
-    // judgement. That is the whole of the inspector: a switch between "play
-    // what the mechanics ask for" and "play this".
+    // Picking an animation pins it; picking it again hands the body back its
+    // own judgement. The body keeps moving either way -- only the choice of
+    // clip is taken out of its hands.
     lab.locked = lab.locked === name ? null : name;
     lab.body.locked = !!lab.locked;
     if (lab.locked) lab.body.anim.play(name, { restart: true });
     for (const [n, b] of lab.chips) b.classList.toggle('on', n === lab.locked);
   });
 
-  const freeze = document.getElementById('btn-freeze');
-  freeze.addEventListener('click', () => {
-    lab.body.anim.frozen = !lab.body.anim.frozen;
-    freeze.classList.toggle('on', lab.body.anim.frozen);
-    freeze.textContent = lab.body.anim.frozen ? 'SOLTAR' : 'CONGELAR';
-  });
-  document.getElementById('btn-prev').addEventListener('click', () => step(-1));
-  document.getElementById('btn-next').addEventListener('click', () => step(1));
-
-  initToggle('btn-debug', ['MOSTRAR COLISÃO', 'ESCONDER COLISÃO'], (i) => { lab.debug = !!i; });
-  initToggle('btn-tracer', TRACER_MODES.map((_, i) => tracerLabel(i)), (i) => {
-    lab.shots.tracerMode = i;
-  });
-
-  document.getElementById('btn-ground').addEventListener('click', () => rebuild({ ground: 1 }));
-  document.getElementById('btn-house').addEventListener('click', () => rebuild({ house: 1 }));
-
-  document.getElementById('btn-hurt').addEventListener('click', () => {
-    hurt(lab.body);
-    if (lab.body.dead) sfxDeath(); else sfxHit();
-  });
-  document.getElementById('btn-revive').addEventListener('click', () => revive(lab.body));
-
   const clips = document.getElementById('clips');
   const toggle = document.getElementById('clips-toggle');
-  // On a small window the panel would sit on top of the controls, so it starts
+  // On a small window the list would sit on top of the controls, so it starts
   // folded away and the buttons stay reachable.
   if (innerWidth < 1000 || innerHeight < 680) {
     clips.classList.add('closed');
@@ -130,24 +103,6 @@ function buildControls() {
   toggle.addEventListener('click', () => {
     clips.classList.toggle('closed');
     toggle.textContent = clips.classList.contains('closed') ? '+' : '—';
-  });
-}
-
-function step(delta) {
-  lab.body.anim.frozen = true;
-  const freeze = document.getElementById('btn-freeze');
-  freeze.classList.add('on');
-  freeze.textContent = 'SOLTAR';
-  lab.body.anim.step(delta);
-}
-
-/** Swap a piece of the stage, keeping the body where it stands. */
-function rebuild(delta) {
-  const s = lab.stage;
-  lab.stage = buildStage({
-    ground: (s.groundIndex + (delta.ground || 0)) % assets.manifest.ground.length,
-    house: (s.houseIndex + (delta.house || 0)) % assets.manifest.layer1.length,
-    stairs: s.stairIndex,
   });
 }
 
@@ -169,7 +124,6 @@ let last = 0;
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000 || 0);
   last = now;
-  lab.fps += ((dt ? 1 / dt : 60) - lab.fps) * 0.1;
 
   const cmd = {
     left: input.held.left,
@@ -181,17 +135,15 @@ function frame(now) {
     pressedStance: consume('stance'),
   };
 
-  const impactsBefore = lab.shots.hits;
   updateBody(lab.body, cmd, lab.stage, dt);
   updateShots(lab.shots, lab.stage, dt);
-  if (lab.shots.hits > impactsBefore) sfxImpact(0);
 
-  // The camera leads the way the body faces and keeps the roof in frame.
+  // The camera leads the way the body faces.
   const want = lab.body.x + lab.body.facing * 120;
   lab.cam.x += (want - lab.cam.x) * Math.min(1, dt * 4.5);
 
-  drawStage(ctx, canvas, lab.stage, lab.body, lab.shots, lab.cam, { debug: lab.debug });
-  readout(lab.body, lab.shots, lab.stage, lab.fps);
+  drawStage(ctx, canvas, lab.stage, lab.body, lab.shots, lab.cam);
+  readout(lab.body);
 
   endFrame();
   requestAnimationFrame(frame);

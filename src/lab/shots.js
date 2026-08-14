@@ -19,13 +19,8 @@ export const TRACER_SHARE = 0.25;   // rounds that leave a visible streak
 export const TRACER_LEN = 150;
 export const TRACER_LIFE = 0.075;
 
-export const TRACER_MODES = ['alguns', 'todos', 'nenhum'];
-
 export function makeShots() {
-  return {
-    bullets: [], tracers: [], sparks: [], flashes: [],
-    fired: 0, hits: 0, tracerMode: 0,
-  };
+  return { bullets: [], tracers: [], sparks: [], flashes: [] };
 }
 
 /**
@@ -35,8 +30,6 @@ export function makeShots() {
 export function fire(shots, from, dir, weapon = 'rifle') {
   const w = WEAPONS[weapon];
   const spread = (Math.random() - 0.5) * w.spread;
-  const trace = shots.tracerMode === 1
-    || (shots.tracerMode === 0 && Math.random() < TRACER_SHARE);
   shots.bullets.push({
     x: from.x,
     y: from.y,
@@ -44,10 +37,9 @@ export function fire(shots, from, dir, weapon = 'rifle') {
     vy: spread * SPEED,
     dmg: w.dmg,
     life: 0.9,
-    trace,
+    trace: Math.random() < TRACER_SHARE,
   });
-  shots.flashes.push({ x: from.x, y: from.y, t: 0.05, dir });
-  shots.fired++;
+  shots.flashes.push({ x: from.x, y: from.y, t: 0.05 });
 }
 
 export function updateShots(shots, stage, dt) {
@@ -78,12 +70,8 @@ export function updateShots(shots, stage, dt) {
       if (stop.target) {
         stop.target.hits++;
         stop.target.flash = 0.35;
-        shots.hits++;
-        burst(shots, stop.x, stop.y, -Math.sign(b.vx), '#e8d9b0');
-      } else {
-        burst(shots, stop.x, stop.y, -Math.sign(b.vx), '#cfc6b4');
       }
-      shots.lastImpact = { x: stop.x, y: stop.y, kind: stop.target ? 'alvo' : 'parede' };
+      burst(shots, stop.x, stop.y, -Math.sign(b.vx), stop.target ? '#e8d9b0' : '#cfc6b4');
       continue;
     }
 

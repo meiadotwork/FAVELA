@@ -62,7 +62,7 @@ html, body {
   backdrop-filter: blur(6px);
 }
 
-#hud { top: 12px; left: 12px; min-width: 176px; display: grid; gap: 4px; }
+#hud { top: 12px; left: 12px; min-width: 168px; display: grid; gap: 4px; }
 #hud .row { display: flex; justify-content: space-between; gap: 14px; }
 #hud b { color: rgba(232, 226, 212, .5); font-weight: 600; }
 #hud span { color: var(--gold); font-weight: 700; }
@@ -83,8 +83,7 @@ html, body {
   margin-bottom: 8px;
 }
 .chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.panel-row { display: flex; gap: 5px; margin-top: 6px; }
-#clips.closed .chips, #clips.closed .panel-row { display: none; }
+#clips.closed .chips { display: none; }
 
 button {
   font: inherit;
@@ -100,7 +99,6 @@ button {
 button:hover { background: rgba(255, 255, 255, .13); }
 button.on { background: var(--gold); border-color: var(--gold); color: #17140c; font-weight: 700; }
 .mini { font-size: 11px; padding: 5px 8px; }
-.wide { flex: 1; }
 
 /* ------------------------------------------------------------ the pad */
 
