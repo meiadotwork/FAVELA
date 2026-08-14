@@ -72,6 +72,8 @@ def collect_assets(quality=None):
         wanted += [f['file'] for f in frames]
     if manifest.get('civilians'):
         wanted.append(manifest['civilians']['sheet'])
+    if manifest.get('house'):
+        wanted.append(manifest['house']['file'])
 
     files = {}
     for rel in dict.fromkeys(wanted):
