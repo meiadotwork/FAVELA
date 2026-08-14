@@ -315,23 +315,24 @@ function drawSelect() {
     const spec = charSpec(key);
     const cx = slot * (i + 0.5);
     const sel = i === game.pick;
-    const baseY = 520;
+    const baseY = 494;
 
     ctx.fillStyle = sel ? 'rgba(242,193,78,.12)' : 'rgba(255,255,255,.03)';
-    ctx.fillRect(cx - slot / 2 + 16, 110, slot - 32, 470);
+    ctx.fillRect(cx - slot / 2 + 16, 104, slot - 32, 486);
     ctx.strokeStyle = sel ? '#f2c14e' : 'rgba(255,255,255,.10)';
     ctx.lineWidth = sel ? 3 : 1.5;
-    ctx.strokeRect(cx - slot / 2 + 16, 110, slot - 32, 470);
+    ctx.strokeRect(cx - slot / 2 + 16, 104, slot - 32, 486);
 
-    // Idle animation in the card, so the pick shows the actual sprite.
-    const frames = anim(key, sel ? 'idle' : 'roster');
+    // The idle loop stands the character up facing forward, which the
+    // turnaround frames do not reliably do -- some of them face away.
+    const frames = anim(key, 'idle');
     const f = frames[Math.floor(game.time * 5) % frames.length];
-    const scale = sel ? 1.5 : 1.25;
-    drawFrame(ctx, key, f, cx, baseY, 1, scale, sel ? 1 : 0.72);
+    const scale = sel ? 1.45 : 1.2;
+    drawFrame(ctx, key, f, cx, baseY, 1, scale, sel ? 1 : 0.7);
 
     ctx.fillStyle = sel ? '#f2c14e' : 'rgba(232,226,212,.75)';
     ctx.font = '700 26px "Trebuchet MS", sans-serif';
-    ctx.fillText(spec.name.toUpperCase(), cx, baseY + 18);
+    ctx.fillText(spec.name.toUpperCase(), cx, baseY + 16);
     ctx.fillStyle = 'rgba(232,226,212,.6)';
     ctx.font = '600 14px "Trebuchet MS", sans-serif';
     const w = WEAPONS[spec.weapon];
