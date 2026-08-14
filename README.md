@@ -15,6 +15,18 @@ python3 -m http.server 8080
 A server is required (not `file://`): the game is ES modules and fetches its
 asset manifest.
 
+### One file, no server
+
+```
+python3 tools/bundle.py dist/favela.html --quality=70
+```
+
+Folds the whole game into a single ~8 MB HTML file — modules concatenated, CSS
+inlined, every atlas and prop a data URI — which opens straight from the
+filesystem and can be hosted anywhere a page can. Each module keeps its own
+scope inside the bundle, publishing its exports to one shared namespace, so two
+modules that both declare `ctx` at the top level still cannot collide.
+
 ## Controls
 
 | | |
@@ -88,7 +100,9 @@ src/
 tools/
   slicer.py         cuts the raw sprite sheets into frames
   build_assets.py   builds the runtime atlases and manifest
+  bundle.py         folds the game into one self-contained HTML file
 assets/        generated — atlases, buildings, assets.json
+dist/          generated — the single-file build (not committed)
 ```
 
 ## Rebuilding the art
