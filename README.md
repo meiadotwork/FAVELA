@@ -59,7 +59,16 @@ its own scale — the sheets are captioned 1.78 m at 110 px — so the simulatio
 written in real units and converted to pixels in exactly one place. A 4 m/s
 sprint is a sprint, and a 14 m shotgun range is a distance you can pace out.
 
-**The map is one house and one corner.** The building is drawn behind you and
+**The lane is a row of buildings.** Six of them, each drawn from its own
+artwork and measured off its own 2 m door: the player's brick house, a low tiled
+wall to crouch behind, a wooden shack, a two-storey block, another shack. A
+building stands in the lane at its two corners only -- the face between them is
+set back, which is why you walk along it in the open -- so the street is a
+sequence of corners with clear ground between them, and both sides fight for
+them. The low wall is the exception: it is cover along its whole length, at
+1.25 m, which hides a crouched man and not a standing one.
+
+**One corner is yours.** The building is drawn behind you and
 you walk straight past it; what stops bullets is its corner, 0.9 m of wall at
 full height that nothing clears at any stance. Everything arrives from up the
 lane, so the far side of that corner is safe ground and stepping past it is the

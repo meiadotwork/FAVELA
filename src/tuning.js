@@ -200,6 +200,7 @@ export const FEEL = {
   shakeShot: 0.6,
   shakeHit: 3.2,
   shakeKill: 2.0,
+  cameraEdge: 4.0,        // m between you and the trailing edge of the screen
   cameraLead: 3.2,        // m the camera leans toward where you are aiming
   cameraDead: 1.0,        // m of slack before the camera moves at all
   cameraLerp: 4.5,

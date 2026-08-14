@@ -10,7 +10,8 @@ export const assets = {
   manifest: null,
   sheets: {},      // character key -> Image
   buildings: [],   // houses, in manifest order
-  house: null,     // the one house in the play plane, if real art was supplied
+  house: null,     // the player's house, if real art was supplied
+  props: {},       // every building in the play plane, by name
   walls: [],       // flat masonry panels, used to texture cover
   cars: [],        // parked vehicles, used as cover
   caveirao: null,  // the police armoured truck
@@ -47,14 +48,17 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
     jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
       .then((img) => { assets.caveirao = img; }));
   }
-  // Optional: real artwork for the house. The manifest can name it, or it can
-  // simply be dropped in at assets/props/casa.png -- either way the renderer
-  // prefers it over the painted one and nothing else has to change.
-  for (const file of [manifest.house?.file, 'props/casa.png', 'props/casa.webp']) {
-    if (!file) continue;
-    jobs.push(loadImage(`${base}/${file}`)
-      .then((img) => { assets.house = assets.house || img; })
-      .catch(() => {}));
+  // The buildings in the play plane, each with its own measurements alongside.
+  for (const [name, spec] of Object.entries(manifest.props || {})) {
+    jobs.push(loadImage(`${base}/${spec.file}`).then((img) => {
+      assets.props[name] = img;
+      if (name === 'casa') assets.house = img;
+    }));
+  }
+
+  if (manifest.climb) {
+    jobs.push(loadImage(`${base}/${manifest.climb.sheet}`)
+      .then((img) => { assets.sheets.climb = img; }));
   }
 
   if (manifest.civilians) {
@@ -80,7 +84,7 @@ export function charSpec(key) {
 // Not every character sheet carries every animation -- the gang sheets have no
 // walk-and-aim, for instance -- so each one names the pose to borrow instead.
 const FALLBACK = {
-  climb: 'walk',          // the drop has no climb frames; the gait stands in
+  climb: 'walk',          // for anyone whose sheet has no climb of their own
   walkAim: 'shoot',
   shoot: 'idle',
   crouchShoot: 'crouch',
@@ -113,7 +117,9 @@ export function frameAt(key, name, i) {
  * Scale is applied about that anchor, so a sprite grows out of the floor.
  */
 export function drawFrame(ctx, key, frame, x, y, facing = 1, scale = 1, alpha = 1) {
-  const sheet = assets.sheets[key];
+  // Most frames live on their character's own atlas; a frame may name another,
+  // which is how one shared sheet -- the climb -- serves several characters.
+  const sheet = assets.sheets[frame.sheet || key];
   if (!sheet) return;
   const w = frame.w * scale;
   const h = frame.h * scale;

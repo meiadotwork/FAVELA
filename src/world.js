@@ -70,6 +70,31 @@ export function setHouse(metres) {
   return HOUSE;
 }
 
+/** Every building the art drop provides, keyed by name, measured in metres. */
+export const PROPS = {};
+export function setProps(props) {
+  Object.assign(PROPS, props || {});
+  return PROPS;
+}
+
+/**
+ * The lane, building by building.
+ *
+ * Each entry is where a facade stands and how far along the lane it sits. The
+ * player's house comes first, then the street runs away from it: a low wall to
+ * crouch behind, a wooden shack, a two-storey block, another shack. The crew
+ * comes from the far end, so every corner between here and there is a place one
+ * side or the other can fight from.
+ */
+const LANE = [
+  { prop: 'casa', at: 28, mine: true },
+  { prop: 'muro', at: 41.5 },
+  { prop: 'barraco', at: 53 },
+  { prop: 'sobrado', at: 67 },
+  { prop: 'muro', at: 76 },
+  { prop: 'casebre', at: 85 },
+];
+
 /**
  * One house on an empty lane.
  *
@@ -82,45 +107,63 @@ export function setHouse(metres) {
  */
 export function buildArena(seed = 7) {
   const len = WORLD.laneLength;
-  const houseX = len * 0.28;                    // centre of the drawn building
-  const cornerX = houseX + HOUSE.w / 2;         // where its wall meets the lane
+  const covers = [];
+  const art = [];
+  const roofs = [];
+  const climbs = [];
+  let mine = null;
 
-  // The building itself is set back and drawn behind the actors, who walk along
-  // its face. What is actually in the lane is the corner, jutting out: a narrow
-  // full-height block that stops everything and that nobody walks through. Cover
-  // in one dimension has to be the corner, not the whole house, or standing
-  // behind the wall would mean standing five metres from the edge you need to
-  // shoot past.
-  const corner = box('corner', cornerX - HOUSE.jut / 2, HOUSE.jut, HOUSE.h, {
-    material: 'concrete',
-    front: false,
-    mine: true,             // the player's corner; the crew does not get to use it
-  });
+  for (const item of LANE) {
+    const spec = PROPS[item.prop];
+    if (!spec) continue;
+    const m = spec.metres;
+    const x0 = item.at;
+    const x1 = x0 + m.w;
+    art.push({ prop: item.prop, x0, w: m.w, h: m.art });
+
+    if (m.roof < 1.6) {
+      // A low wall is cover along its whole length: you crouch behind it, and
+      // standing up puts your muzzle over the top of it.
+      covers.push(box('wall', (x0 + x1) / 2, m.w, m.roof, { material: 'concrete' }));
+      continue;
+    }
+
+    // A building stands in the lane at its two corners only. The face between
+    // them is set back, which is why you can walk along it in the open.
+    for (const [cx, side] of [[x0 + HOUSE.jut / 2, -1], [x1 - HOUSE.jut / 2, 1]]) {
+      const c = box('corner', cx, HOUSE.jut, m.roof, {
+        material: 'concrete',
+        mine: !!item.mine && side > 0,
+      });
+      covers.push(c);
+      if (item.mine && side > 0) mine = c;
+    }
+
+    if (m.climb && m.clear) {
+      roofs.push({ y: m.roof, x0: x0 + m.clear[0], x1: x0 + m.clear[1] });
+      climbs.push({
+        foot: x0 - 0.5,                      // at the foot of the near wall
+        landing: x0 + m.clear[0] + 0.5,      // and over the parapet
+        top: m.roof,
+      });
+    }
+  }
+
+  covers.sort((a, b) => a.x0 - b.x0);
+  const corner = mine || covers[0];
 
   return {
     length: len,
-    covers: [corner],
-    // Where the artwork goes, which is wider than the thing that stops bullets.
-    art: { x0: cornerX - HOUSE.w, w: HOUSE.w },
+    covers,
+    art,
+    roofs,
+    climbs,
     corner,
-    // The roof: only the stretch of slab with nothing standing on it, measured
-    // off the artwork, so a man never ends up inside the water tank.
-    roofs: [{
-      y: HOUSE.h,
-      x0: cornerX - HOUSE.w + HOUSE.clear[0],
-      x1: cornerX - HOUSE.w + HOUSE.clear[1],
-    }],
-    // You go up the far wall -- the side the shooting is not coming from.
-    climbs: [{
-      foot: cornerX - HOUSE.w - 0.5,                     // at the foot of it
-      landing: cornerX - HOUSE.w + HOUSE.clear[0] + 0.5, // and over the parapet
-      top: HOUSE.h,
-    }],
     // Everything arrives from up the lane, so one side of the corner is safe.
-    threat: 1,                                  // the direction they come from
+    threat: 1,
     spawn: {
-      enemy: [cornerX + 34, cornerX + 58],      // where they come on from
-      player: cornerX - HOUSE.jut - 2.2,        // in the lee of the corner
+      enemy: [corner.x1 + 34, corner.x1 + 52],
+      player: corner.x0 - 2.6,
     },
     seed,
   };

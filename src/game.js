@@ -6,7 +6,7 @@
 
 import { loadAssets } from './assets.js';
 import { STANCE_ORDER, FEEL, HEALTH, WEAPONS } from './tuning.js';
-import { buildArena, climbAt, setHouse, rng, range } from './world.js';
+import { buildArena, climbAt, setHouse, setProps, rng, range } from './world.js';
 import {
   makeActor, updateActor, separate, setStance, cycleStance,
   centre, muzzleX, muzzleY, weaponOf, startReload,
@@ -342,6 +342,7 @@ async function boot() {
   });
   // The artwork carries its own measurements; the level is built from those.
   setHouse(manifest.house?.metres);
+  setProps(manifest.props);
   document.getElementById('boot')?.classList.add('done');
 
   // A quiet lane to look at behind the title screen.

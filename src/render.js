@@ -7,7 +7,7 @@
 
 import { PX_PER_M, SPRITE_SCALE, FEEL } from './tuning.js';
 import { assets, anim, frameAt, drawFrame } from './assets.js';
-import { rng, HOUSE } from './world.js';
+import { rng, HOUSE, PROPS } from './world.js';
 import { paintHouse } from './props.js';
 import { bodyHeight, strideOf, posX } from './actor.js';
 
@@ -213,35 +213,35 @@ function drawGround() {
 // --- the house -----------------------------------------------------------
 
 /**
- * The one building in the play plane. Real artwork wins if it is in assets;
- * otherwise the painted one, which is drawn to the same measurements. It is
- * wider than the box that stops bullets -- the wall is set back and only its
- * corner stands in the lane -- so it draws from the arena's art rectangle.
+ * The buildings in the play plane, drawn from the arena's art rectangles. Each
+ * one is placed by its measured width, so the drawing and the cover boxes that
+ * came out of the same measurements cannot drift apart.
  */
-function drawHouse(arena) {
-  const { ctx } = view;
-  const w = arena.art.w * pxm();
-  const x = sx(arena.art.x0);
-
-  if (assets.house) {
-    const img = assets.house;
-    const h = (img.height / img.width) * w;
-    ctx.drawImage(img, x, sy(0) - h, w, h);
-  } else {
-    // No artwork: paint one, once, to whatever the measurements now say.
-    if (!view.house) view.house = paintHouse(HOUSE);
-    const { canvas, metres } = view.house;
-    const h = metres * pxm();
-    ctx.drawImage(canvas, x, sy(0) - h, w, h);
+function drawBuildings(arena) {
+  const { ctx, W } = view;
+  for (const item of arena.art) {
+    const img = assets.props[item.prop];
+    const w = item.w * pxm();
+    const x = sx(item.x0);
+    if (x > W || x + w < 0) continue;
+    if (img) {
+      const h = (img.height / img.width) * w;
+      ctx.drawImage(img, x, sy(0) - h, w, h);
+    } else if (item.prop === 'casa') {
+      if (!view.house) view.house = paintHouse(HOUSE);
+      const { canvas, metres } = view.house;
+      ctx.drawImage(canvas, x, sy(0) - metres * pxm(), w, metres * pxm());
+    }
   }
 
-  // The lee of the corner, which is the thing the player is actually using.
+  // The lee of the player's corner, so the safe side reads as shadow.
   const c = arena.corner;
   const shade = ctx.createLinearGradient(sx(c.x0 - 3.5), 0, sx(c.x0), 0);
   shade.addColorStop(0, 'rgba(0,0,0,0)');
-  shade.addColorStop(1, 'rgba(0,0,0,0.35)');
+  shade.addColorStop(1, 'rgba(0,0,0,0.3)');
   ctx.fillStyle = shade;
   ctx.fillRect(sx(c.x0 - 3.5), sy(c.h), 3.5 * pxm(), c.h * pxm());
+  void PROPS;
 }
 
 // --- actors --------------------------------------------------------------
@@ -260,7 +260,12 @@ function frameIndex(a, n) {
       return Math.floor((a.step / (2 * strideOf(a))) * n);
     case 'crouch':
       return moving ? Math.floor((a.step / (2 * strideOf(a))) * n) : Math.floor(a.animT * 5);
-    case 'climb': return Math.floor(a.animT * 7);
+    case 'climb': {
+      // One pass of the six frames across the whole climb, so the reach at the
+      // top lands as he arrives rather than half way up.
+      const k = a.climb ? Math.min(0.999, a.climb.t / a.climb.dur) : 0.999;
+      return Math.floor(k * n);
+    }
     case 'shoot': case 'crouchShoot': case 'proneShoot': return Math.floor(a.animT * 22);
     case 'hit': return Math.min(2, Math.floor(a.animT * 18));
     case 'death': return Math.floor(a.dying * 11);
@@ -394,18 +399,17 @@ export function drawFx(fx, bullets) {
 
 export function updateCamera(game, dt) {
   const p = game.player;
-  // The crew only ever comes from one end, so the camera leans that way: you
-  // are looking down the lane you are shooting down.
-  const lead = p.aimTarget ? Math.sign(p.aimTarget.x - p.x) || game.arena.threat : game.arena.threat;
-  const want = p.x + lead * FEEL.cameraLead * (p.intent.fire ? 1.3 : 0.8);
-  const cam = view.cam;
+  // The crew only ever comes from one end, so the camera does not centre on
+  // the player at all: it puts him against the trailing edge and gives the
+  // whole rest of the screen to the lane he is shooting down. You and whoever
+  // is coming for you end up on opposite edges of the same picture.
   const half = viewWidth() / 2;
+  const want = p.x + game.arena.threat * (half - FEEL.cameraEdge);
+  const cam = view.cam;
   const lo = half - 6;
   const hi = game.arena.length - half + 6;
   cam.target = Math.max(Math.min(lo, hi), Math.min(Math.max(lo, hi), want));
-  if (Math.abs(cam.target - cam.x) > FEEL.cameraDead) {
-    cam.x += (cam.target - cam.x) * Math.min(1, FEEL.cameraLerp * dt);
-  }
+  cam.x += (cam.target - cam.x) * Math.min(1, FEEL.cameraLerp * dt);
 }
 
 export function renderFrame(game) {
@@ -421,7 +425,7 @@ export function renderFrame(game) {
   drawBackdrop();
   drawGround();
 
-  drawHouse(game.arena);
+  drawBuildings(game.arena);
 
   const order = game.actors.slice().sort((a, b) => (a.alive === b.alive ? a.x - b.x : (a.alive ? 1 : -1)));
   for (const a of order) drawActor(a);
