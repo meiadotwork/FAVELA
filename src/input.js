@@ -1,8 +1,14 @@
 // Keyboard, mouse and touch, flattened to one set of named actions.
 //
-// Nothing above this file knows what a key is: the game asks whether MOVE_LEFT
-// is held or STANCE_DOWN was just pressed, and the same question is answered by
-// a keyboard, a thumb on the left half of a phone, or a mouse button.
+// Nothing above this file knows what a key is: the game asks whether `left` is
+// held or `reload` was just pressed, and the same question is answered by a
+// keyboard, a mouse, or a thumb on a phone.
+//
+// On touch the left of the screen is an invisible pair of walk zones -- the
+// near half walks left, the far half walks right, and sliding a thumb between
+// them switches direction without lifting it -- while the right of the screen
+// carries the buttons, which are drawn by the HUD from the same table used to
+// hit-test them, so what you press is always what you see.
 
 const KEYMAP = {
   ArrowLeft: 'left', KeyA: 'left',
@@ -13,7 +19,7 @@ const KEYMAP = {
   Space: 'fire',
   KeyR: 'reload',
   KeyC: 'stance',
-  KeyQ: 'prone',
+  KeyE: 'swap',
   Digit1: 'w1', Digit2: 'w2', Digit3: 'w3',
   KeyP: 'pause', Escape: 'pause',
   KeyM: 'mute',
@@ -21,21 +27,27 @@ const KEYMAP = {
   Enter: 'start', NumpadEnter: 'start',
 };
 
+/** How far across the screen the invisible walk zones reach. */
+const WALK_ZONE = 0.42;
+
 export function makeInput(canvas) {
-  const held = new Set();
+  const keys = new Set();      // held on the keyboard or mouse
+  const touched = new Set();   // held by a finger, recomputed every touch event
   const edges = new Set();
+  const touches = new Map();   // identifier -> the action that finger is on
+
   const input = {
-    held,
     mouse: { x: 0, y: 0, active: false, down: false },
-    touch: { stick: 0, fire: false, active: false },
-    down: (a) => held.has(a),
+    touch: { active: false },
+    pads: [],
+    down: (a) => keys.has(a) || touched.has(a),
     /** True once per press -- consumed, so two callers cannot both see it. */
-    hit: (a) => (edges.delete(a) ? true : false),
+    hit: (a) => edges.delete(a),
     flush: () => edges.clear(),
   };
 
-  const press = (a) => { if (!held.has(a)) edges.add(a); held.add(a); };
-  const release = (a) => { held.delete(a); };
+  const press = (a) => { if (!keys.has(a)) edges.add(a); keys.add(a); };
+  const release = (a) => { keys.delete(a); };
 
   addEventListener('keydown', (e) => {
     const a = KEYMAP[e.code];
@@ -47,23 +59,32 @@ export function makeInput(canvas) {
     const a = KEYMAP[e.code];
     if (a) release(a);
   });
-  addEventListener('blur', () => { held.clear(); edges.clear(); });
+  addEventListener('blur', () => { keys.clear(); touched.clear(); touches.clear(); edges.clear(); });
 
-  // --- mouse. Moving it takes over the aim; the keyboard takes it back.
+  // Canvas coordinates, clamped into the picture. A 16:9 canvas on a wider
+  // phone leaves black bars down the sides, and a thumb that lands on one is
+  // still a thumb asking for something -- so the bars count as their edge.
   const toCanvas = (ev) => {
     const r = canvas.getBoundingClientRect();
+    const x = ((ev.clientX - r.left) / r.width) * canvas.width;
+    const y = ((ev.clientY - r.top) / r.height) * canvas.height;
     return {
-      x: ((ev.clientX - r.left) / r.width) * canvas.width,
-      y: ((ev.clientY - r.top) / r.height) * canvas.height,
+      x: Math.max(0, Math.min(canvas.width, x)),
+      y: Math.max(0, Math.min(canvas.height, y)),
     };
   };
+
+  // --- mouse. Moving it takes over the aim -- but a phone that synthesises
+  // mouse events from taps must not be allowed to do that.
   canvas.addEventListener('mousemove', (e) => {
+    if (input.touch.active) return;
     const p = toCanvas(e);
     input.mouse.x = p.x;
     input.mouse.y = p.y;
     input.mouse.active = true;
   });
   canvas.addEventListener('mousedown', (e) => {
+    if (input.touch.active) return;
     const p = toCanvas(e);
     input.mouse.x = p.x;
     input.mouse.y = p.y;
@@ -77,60 +98,71 @@ export function makeInput(canvas) {
   });
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-  // --- touch. Left half steers, right half shoots, corner pads do the rest.
-  const pads = [];
-  const touches = new Map();
+  // --- touch.
+  //
+  // The buttons live on the right, where a right thumb rests, and every one of
+  // them is transparent: this is a screen you are trying to see through.
   const layout = () => {
     const w = canvas.width;
     const h = canvas.height;
-    pads.length = 0;
-    pads.push({ a: 'run', x: w - 300, y: h - 120, r: 52, label: 'CORRE' });
-    pads.push({ a: 'stance', x: w - 180, y: h - 120, r: 52, label: 'AGACHA' });
-    pads.push({ a: 'reload', x: w - 60, y: h - 120, r: 52, label: 'RECARGA' });
+    input.pads = [
+      { a: 'fire', x: w - 150, y: h - 160, r: 86, label: 'TIRO' },
+      { a: 'stance', x: w - 310, y: h - 108, r: 58, label: 'AGACHA' },
+      { a: 'reload', x: w - 160, y: h - 344, r: 54, label: 'CARREGA' },
+      { a: 'swap', x: w - 320, y: h - 268, r: 50, label: 'ARMA' },
+      { a: 'run', x: w - 455, y: h - 100, r: 46, label: 'CORRE' },
+    ];
   };
   layout();
-  input.pads = pads;
+  input.relayout = layout;
 
-  const padAt = (p) => pads.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.2);
+  const padAt = (p) => input.pads.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.12);
+
+  /** What a finger at this point is asking for. */
+  const actionAt = (p) => {
+    const pad = padAt(p);
+    if (pad) return pad.a;
+    if (p.x < canvas.width * WALK_ZONE) {
+      return p.x < canvas.width * (WALK_ZONE / 2) ? 'left' : 'right';
+    }
+    return 'fire';           // anywhere on the open right is also the trigger
+  };
 
   const onTouch = (e) => {
     e.preventDefault();
     input.touch.active = true;
+    input.mouse.active = false;
+
     for (const t of e.changedTouches) {
-      const p = toCanvas(t);
-      if (e.type === 'touchstart') {
-        const pad = padAt(p);
-        if (pad) { touches.set(t.identifier, { pad }); press(pad.a); continue; }
-        if (p.x > canvas.width * 0.52) {
-          touches.set(t.identifier, { fire: true });
-          press('fire');
-        } else {
-          touches.set(t.identifier, { stick: true, ox: p.x });
-        }
-      } else if (e.type === 'touchmove') {
-        const rec = touches.get(t.identifier);
-        if (rec?.stick) input.touch.stick = Math.max(-1, Math.min(1, (p.x - rec.ox) / 70));
-      } else {
-        const rec = touches.get(t.identifier);
-        if (rec?.stick) input.touch.stick = 0;
-        if (rec?.fire) release('fire');
-        if (rec?.pad) release(rec.pad.a);
+      if (e.type === 'touchend' || e.type === 'touchcancel') {
         touches.delete(t.identifier);
+      } else {
+        // Re-read the action on every move, so sliding from the left zone into
+        // the right one turns you round instead of sticking.
+        touches.set(t.identifier, actionAt(toCanvas(t)));
       }
     }
-    input.touch.fire = held.has('fire');
+
+    // Rebuild what is held from the fingers currently down, and fire an edge
+    // for anything that has just appeared.
+    const now = new Set(touches.values());
+    for (const a of now) if (!touched.has(a)) edges.add(a);
+    touched.clear();
+    for (const a of now) touched.add(a);
   };
   for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
-    canvas.addEventListener(type, onTouch, { passive: false });
+    document.addEventListener(type, onTouch, { passive: false });
   }
 
-  input.relayout = layout;
   return input;
 }
 
-/** Left/right as one axis, keyboard and thumb-stick folded together. */
+/** Left and right as one axis, whichever hand is driving. */
 export function moveAxis(input) {
-  let ax = (input.down('right') ? 1 : 0) - (input.down('left') ? 1 : 0);
-  if (!ax && Math.abs(input.touch.stick) > 0.15) ax = input.touch.stick;
-  return Math.max(-1, Math.min(1, ax));
+  return (input.down('right') ? 1 : 0) - (input.down('left') ? 1 : 0);
+}
+
+/** Any input at all, for the title and death screens. */
+export function anyPress(input) {
+  return input.hit('start') || input.hit('fire') || input.hit('left') || input.hit('right');
 }

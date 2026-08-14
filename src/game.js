@@ -14,11 +14,11 @@ import {
 import { makeBrain, updateBrain } from './ai.js';
 import { makeBullet, stepBullets, aimPoint } from './combat.js';
 import { makeFx, updateFx, flash, casing, mark, blood, shake, hitstop, kickFor } from './fx.js';
-import { makeInput, moveAxis } from './input.js';
+import { makeInput, moveAxis, anyPress } from './input.js';
 import {
   initRender, buildBackdrop, renderFrame, updateCamera, view, toWorldX, toWorldY,
 } from './render.js';
-import { drawHud, drawTitle, drawPause, drawDead } from './hud.js';
+import { drawHud, drawTitle, drawPause, drawDead, drawRotateHint } from './hud.js';
 import { drawDebug } from './debug.js';
 import {
   resumeAudio, toggleMute, playShot, playImpact, playDry, playReloadDone,
@@ -51,9 +51,12 @@ const game = {
   banner: '',
   bannerT: 0,
   debug: false,
+  runLock: false,          // a phone has no shift key to hold
   lastDt: STEP,
   input: null,
 };
+
+const WEAPON_CYCLE = ['rifle', 'pistol', 'shotgun'];
 
 // --- what the simulation calls back into ---------------------------------
 
@@ -190,13 +193,23 @@ function readPlayer(input, dt) {
   if (!p.alive) { it.fire = false; it.move = 0; return; }
 
   it.move = moveAxis(input);
-  it.run = input.down('run');
   it.fire = input.down('fire');
-  it.reload = input.hit('reload');
+  if (input.hit('reload')) it.reload = true;   // held until a step consumes it
+
+  // Shift is a hold; a thumb is a toggle. Both end up as the same intent.
+  if (input.touch.active) {
+    if (input.hit('run')) game.runLock = !game.runLock;
+  } else {
+    game.runLock = false;
+  }
+  it.run = input.down('run') || game.runLock;
 
   if (input.hit('w1')) it.swap = 'rifle';
   if (input.hit('w2')) it.swap = 'pistol';
   if (input.hit('w3')) it.swap = 'shotgun';
+  if (input.hit('swap')) {
+    it.swap = WEAPON_CYCLE[(WEAPON_CYCLE.indexOf(p.weapon) + 1) % WEAPON_CYCLE.length];
+  }
 
   // Down goes one stance lower, up goes one higher: stand, crouch, prone.
   if (input.hit('down')) cycleStance(p, 1);
@@ -205,7 +218,6 @@ function readPlayer(input, dt) {
     const i = STANCE_ORDER.indexOf(p.want);
     setStance(p, STANCE_ORDER[(i + 1) % 3]);
   }
-  if (input.hit('prone')) setStance(p, p.want === 'prone' ? 'stand' : 'prone');
 
   // Aim: the mouse if it has been moved, otherwise the nearest enemy in reach.
   // Either way the shot is a real line from the muzzle, and cover is cover.
@@ -215,8 +227,12 @@ function readPlayer(input, dt) {
     p.aimTarget = { x: wx, y: wy };
     p.aimLocked = false;
   } else {
+    // With nothing to lock onto, aim the way you are walking -- taking the
+    // fallback from the current facing instead would pin you to one direction
+    // for the whole game, since facing is then only ever set by the fallback.
     const spot = autoTarget(p);
-    p.aimTarget = spot || { x: p.x + p.facing * 12, y: muzzleY(p) };
+    const dir = it.move !== 0 ? Math.sign(it.move) : p.facing;
+    p.aimTarget = spot || { x: p.x + dir * 12, y: muzzleY(p) };
     p.aimLocked = !!spot;
   }
   it.aimAt = p.aimTarget;
@@ -275,9 +291,9 @@ function frame(now) {
   if (input.hit('mute')) toggleMute();
 
   if (game.screen === 'title') {
-    if (input.hit('start') || input.hit('fire')) { resumeAudio(); startRun(); }
+    if (anyPress(input)) { resumeAudio(); startRun(); }
   } else if (game.screen === 'dead') {
-    if (input.hit('start') || input.hit('fire')) { playUi(false); game.screen = 'title'; }
+    if (anyPress(input)) { playUi(false); game.screen = 'title'; }
   } else if (input.hit('pause')) {
     game.screen = game.screen === 'pause' ? 'play' : 'pause';
   }
@@ -302,6 +318,7 @@ function frame(now) {
   if (game.screen === 'title') drawTitle(game);
   if (game.screen === 'pause') drawPause();
   if (game.screen === 'dead') drawDead(game);
+  drawRotateHint();
 
   input.flush();
 }

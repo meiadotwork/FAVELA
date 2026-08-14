@@ -41,8 +41,13 @@ modules that both declare `ctx` at the top level still cannot collide.
 | C | Cycle stance · P Pause · M Mute |
 | F1 | Draw the mechanics |
 
-On touch, the left half of the screen is a virtual stick, the right half fires,
-and the corner pads are run, stance and reload.
+On touch, the left of the screen is two invisible walk zones — the near half
+walks left, the far half walks right, and sliding your thumb between them turns
+you round without lifting it. The right carries five transparent buttons: fire,
+crouch, reload, weapon and run, the last of which latches on until you tap it
+again. Anywhere on the open right of the screen is also the trigger, and the
+black bars either side of the picture count as the edge they sit against, so a
+thumb resting off the canvas still works. Hold the phone sideways.
 
 ## How the fight works
 

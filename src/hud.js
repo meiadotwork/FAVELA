@@ -61,10 +61,10 @@ function crosshair(game) {
 }
 
 function healthBlock(game) {
-  const { ctx, H } = view;
+  const { ctx } = view;
   const p = game.player;
   const x = 26;
-  const y = H - 92;
+  const y = 18;
   panel(ctx, x, y, 232, 66);
 
   const frac = Math.max(0, p.hp / p.maxHp);
@@ -90,11 +90,11 @@ function healthBlock(game) {
 }
 
 function ammoBlock(game) {
-  const { ctx, W, H } = view;
+  const { ctx, W } = view;
   const p = game.player;
   const w = WEAPONS[p.weapon];
   const x = W - 258;
-  const y = H - 92;
+  const y = 18;
   panel(ctx, x, y, 232, 66);
 
   label(ctx, w.name, x + 12, y + 24, 14, GOLD);
@@ -171,23 +171,80 @@ function overlays(game) {
   }
 }
 
+// --- the touch controls --------------------------------------------------
+//
+// Drawn from the same table input.js hit-tests, so the button you can see is
+// exactly the button you are pressing. They stay transparent: this is a screen
+// you are trying to look through, and the left of it carries no furniture at
+// all -- walking is two invisible zones under your other thumb.
+
+const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+
+function touchPads(game) {
+  const { ctx } = view;
+  const input = game.input;
+  if (!input || !(input.touch.active || coarse)) return;
+  const p = game.player;
+
+  for (const pad of input.pads) {
+    const lit = input.down(pad.a) || (pad.a === 'run' && game.runLock);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(pad.x, pad.y, pad.r, 0, 6.283);
+    ctx.fillStyle = lit ? 'rgba(242,193,78,0.20)' : 'rgba(240,238,230,0.06)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = lit ? 'rgba(242,193,78,0.85)' : 'rgba(240,238,230,0.28)';
+    ctx.stroke();
+
+    // The weapon button says which weapon, since that is the question you ask
+    // of it -- the others say what they do.
+    const text = pad.a === 'swap' ? WEAPONS[p.weapon].name : pad.label;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${pad.r > 60 ? 15 : 11}px "Trebuchet MS", system-ui, sans-serif`;
+    ctx.fillStyle = lit ? GOLD : 'rgba(240,238,230,0.6)';
+    ctx.fillText(text, pad.x, pad.y);
+    ctx.restore();
+  }
+}
+
+/** A phone held upright shows a sliver of lane and none of the fight. */
+export function drawRotateHint() {
+  if (typeof innerWidth !== 'number' || innerWidth > innerHeight * 0.95) return false;
+  const { ctx, W, H } = view;
+  ctx.fillStyle = 'rgba(6,5,8,0.92)';
+  ctx.fillRect(0, 0, W, H);
+  label(ctx, 'GIRE O TELEFONE', W / 2, H / 2, 34, GOLD, 'center');
+  label(ctx, 'o jogo e deitado', W / 2, H / 2 + 28, 15, 'rgba(232,226,212,0.6)', 'center');
+  return true;
+}
+
 export function drawHud(game) {
   crosshair(game);
   healthBlock(game);
   ammoBlock(game);
   waveBlock(game);
+  touchPads(game);
   overlays(game);
 }
 
-const LINES = [
+const KEYS = [
   ['SETAS / WASD', 'andar'],
   ['SHIFT', 'correr'],
   ['BAIXO', 'agachar, depois deitar'],
   ['CIMA', 'levantar'],
   ['ESPACO / MOUSE', 'atirar'],
   ['R', 'recarregar'],
-  ['1 2 3', 'fuzil, pistola, doze'],
+  ['1 2 3 / E', 'fuzil, pistola, doze'],
   ['F1', 'mostrar a mecanica'],
+];
+
+const THUMBS = [
+  ['ESQUERDA DA TELA', 'andar - metade esquerda vai pra esquerda,'],
+  ['', 'metade direita vai pra direita'],
+  ['BOTOES', 'tiro, agacha, carrega, arma, corre'],
+  ['CORRE', 'fica ligado ate desligar'],
 ];
 
 export function drawTitle(game) {
@@ -198,13 +255,13 @@ export function drawTitle(game) {
   label(ctx, 'segure a viela', W / 2, H * 0.3 + 28, 16, 'rgba(232,226,212,0.7)', 'center');
 
   let y = H * 0.46;
-  for (const [k, v] of LINES) {
+  for (const [k, v] of (game?.input?.touch.active || coarse ? THUMBS : KEYS)) {
     label(ctx, k, W / 2 - 24, y, 13, '#e8e2d4', 'right');
     label(ctx, v, W / 2 + 24, y, 13, 'rgba(232,226,212,0.6)');
     y += 22;
   }
-  label(ctx, 'ENTER PARA COMECAR', W / 2, H * 0.88, 15, GOLD, 'center');
-  void game;
+  const touch = game?.input?.touch.active || coarse;
+  label(ctx, touch ? 'TOQUE PARA COMECAR' : 'ENTER PARA COMECAR', W / 2, H * 0.88, 15, GOLD, 'center');
 }
 
 export function drawPause() {
@@ -221,5 +278,6 @@ export function drawDead(game) {
   ctx.fillRect(0, 0, W, H);
   label(ctx, 'CAIU', W / 2, H * 0.42, 58, '#d0453a', 'center');
   label(ctx, `onda ${game.wave} · ${game.kills} abatidos`, W / 2, H * 0.42 + 30, 15, '#e8e2d4', 'center');
-  label(ctx, 'ENTER PARA VOLTAR', W / 2, H * 0.42 + 74, 14, GOLD, 'center');
+  label(ctx, game?.input?.touch.active || coarse ? 'TOQUE PARA VOLTAR' : 'ENTER PARA VOLTAR',
+    W / 2, H * 0.42 + 74, 14, GOLD, 'center');
 }

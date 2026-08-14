@@ -283,6 +283,10 @@ export function updateActor(a, dt, game) {
     a.hp = Math.min(a.maxHp, a.hp + HEALTH.regenRate * dt);
   }
 
+  // One-shot intents live exactly one simulation step, not one frame: a frame
+  // that draws without stepping must not swallow the reload you asked for.
+  it.reload = false;
+
   const next = pickAnim(a);
   a.animT = next === a.anim ? a.animT + dt : 0;
   a.anim = next;
