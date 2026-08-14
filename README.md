@@ -2,7 +2,8 @@
 
 A 2D cover shooter in HTML5. You pick one of four characters and hold the alley
 against rival crews and police raids across six levels, each at a different time
-of day and in different weather.
+of day and in different weather. The rival crews field a hooded pistoleiro and a
+shotgun carrier; the police come in behind an armoured caveirão.
 
 No build step, no dependencies — open it over a local server and it runs.
 
@@ -45,6 +46,12 @@ three numbers:
   through the windows while a crouched one hits the body.
 - A house corner juts into the lane at full height: you step past it to shoot and
   step back behind it to be safe.
+- The caveirão is armoured throughout, with no glass band. Nothing goes through it.
+
+Weapons differ in how they answer that geometry. The rifle is a steady stream,
+the pistol hits harder per shot, and the shotgun throws six pellets that spread
+wide and fall short — murderous across a doorway, close to useless down the
+length of the alley.
 
 **Aim is automatic**, as specified. The shot is steered onto the nearest target
 ahead of you, so the decisions are where to stand and when to stand up, not
@@ -94,7 +101,7 @@ pip install pillow numpy scipy
 python3 tools/build_assets.py /path/to/raw-drop assets
 ```
 
-Four things in there are worth knowing about, because the raw art fought back:
+Five things in there are worth knowing about, because the raw art fought back:
 
 **The sheets have no grid.** Each is a loose arrangement of poses — 5×2 here, a
 single stacked column there — and the poses overlap, a rifle barrel routinely
@@ -130,19 +137,23 @@ how the flee animation is found without labelling anything.
 Sound is synthesised at runtime — the drop had no audio, and a firefight is
 mostly noise bursts and sirens.
 
-### Sheets the pipeline cannot read
+**The captioned sheets are read, not parsed.** The two gang characters arrive on
+one sheet each with every animation on it and a caption per row. Finding those
+groups automatically failed: the captions sit level with the frames they label
+rather than above them, so a gap-based cut returns one box holding both the
+lettering and the body, and the rows overlap vertically, so grouping by row
+cascades into a single blob. What is reliable is the sheet's own documentation —
+the row order is fixed and every row states its frame count — so the bands are
+read off the sheet once into a table in `build_assets.py`, and each band is cut
+into exactly the number of frames its caption claims. The lettering is rubbed off
+first, a glyph or a whole underlined line at a time, with the threshold set below
+a muzzle flash so the shooting frames keep their fire. The death rows are the
+exception: their poses are strewn across two staggered sub-rows that overlap in
+x, so no vertical cut separates them, and they are taken as whole blobs instead.
 
-The two captioned gang characters (GANG_CAPUZ, GANG_PANO) are not built. Their
-sheets caption each row at the same height as its first frame, with no gap, so
-the cut returns a single box holding both the lettering and the body; and HIT and
-DEATH are parked in the empty right-hand side of earlier rows, with DEATH's six
-frames staggered across two sub-rows. Neither row grouping nor caption anchoring
-survives that.
-
-They will build as they are if re-exported the way the effects sheet is laid out:
-one animation per row, the caption clear above the frames rather than level with
-them, and a uniform cell pitch with each pose inside its own cell. Ruled cell
-borders help — that is how the effects sheet is cut.
+If those sheets are ever re-exported, laying them out like the effects sheet —
+one animation per row, caption clear above the frames, uniform cell pitch — would
+let them cut with no table at all.
 
 ## Credit
 

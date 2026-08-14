@@ -77,12 +77,16 @@ function startLevel(levelIndex, playerKey) {
   return world;
 }
 
+// The rival crews: the two captioned gang characters, plus whichever of the
+// playable four the player did not pick.
+const GANG = ['capuz', 'pano'];
+
 /** Enemy roster for a level: rival crews, police, or both. */
 function enemyKeyFor(level, i) {
+  const crews = GANG.concat(PLAYABLE.filter((k) => k !== level.playerKey));
   if (level.enemy === 'police') return 'po';
-  if (level.enemy === 'mixed') return i % 2 === 0 ? 'po' : PLAYABLE[(i * 7 + 1) % PLAYABLE.length];
-  const pool = PLAYABLE.filter((k) => k !== level.playerKey);
-  return pool[i % pool.length];
+  if (level.enemy === 'mixed') return i % 2 === 0 ? 'po' : crews[(i * 3 + 1) % crews.length];
+  return crews[i % crews.length];
 }
 
 function spawnWave(world) {

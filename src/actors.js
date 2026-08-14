@@ -17,8 +17,14 @@ export const STANCE = {
 };
 
 export const WEAPONS = {
-  rifle: { rof: 0.11, dmg: 9, speed: 1750, mag: 30, reload: 1.7, spread: 0.02, burst: 0 },
-  pistol: { rof: 0.20, dmg: 14, speed: 1450, mag: 12, reload: 1.35, spread: 0.015, burst: 0 },
+  rifle: { rof: 0.11, dmg: 9, speed: 1750, mag: 30, reload: 1.7, spread: 0.02 },
+  pistol: { rof: 0.20, dmg: 14, speed: 1450, mag: 12, reload: 1.35, spread: 0.015 },
+  // A handful of pellets that spread wide and fall short: murderous inside a
+  // room, close to harmless down the length of the alley.
+  shotgun: {
+    rof: 0.82, dmg: 7, speed: 1150, mag: 6, reload: 2.3, spread: 0.11,
+    pellets: 6, range: 0.34,
+  },
 };
 
 export function makeActor(key, x, opts = {}) {
@@ -104,20 +110,25 @@ export function tryFire(world, a) {
     vy = Math.max(-620, Math.min(620, vy));
   }
   const scatter = ai ? w.spread * (3.4 - ai.skill * 1.8) : w.spread;
-  vy += (Math.random() - 0.5) * w.speed * scatter;
 
-  world.bullets.push({
-    x: from.x,
-    y: from.y,
-    vx: a.facing * w.speed,
-    vy,
-    dmg: w.dmg * (ai ? 0.5 : 1),
-    team: a.team,
-    owner: a,
-    homing: ai ? null : target,
-    life: 1.6,
-    trail: 0,
-  });
+  // A shotgun sprays its whole load at once; everything else fires one round.
+  // Pellets are not steered -- spread is the point of the weapon.
+  const pellets = w.pellets || 1;
+  for (let i = 0; i < pellets; i++) {
+    const jitter = (Math.random() - 0.5) * w.speed * scatter;
+    world.bullets.push({
+      x: from.x,
+      y: from.y,
+      vx: a.facing * w.speed * (1 + (Math.random() - 0.5) * 0.12),
+      vy: vy + jitter,
+      dmg: w.dmg * (ai ? 0.5 : 1),
+      team: a.team,
+      owner: a,
+      homing: pellets > 1 || ai ? null : target,
+      life: w.range || 1.6,
+      trail: 0,
+    });
+  }
 
   a.ammo--;
   a.cooldown = w.rof * (ai ? 2.3 : 1);

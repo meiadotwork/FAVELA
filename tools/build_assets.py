@@ -376,6 +376,8 @@ def main(raw, out_dir, houses=32, walls=10):
     for key, spec in MANIFEST.items():
         manifest['characters'][key] = build_character(key, spec, raw, out_dir)
     manifest['buildings'], manifest['walls'] = build_buildings(raw, out_dir, houses, walls)
+    for gkey, gspec in GANGS.items():
+        manifest['characters'][gkey] = build_gang(gkey, gspec, raw, out_dir)
     manifest['cars'], manifest['caveirao'] = build_vehicles(raw, out_dir)
     manifest['fx'] = build_fx(raw, out_dir)
     manifest['civilians'] = build_civilians(raw, out_dir)
@@ -722,6 +724,163 @@ def build_civilians(raw, out_dir):
     atlas.save(os.path.join(out_dir, 'civ.webp'), quality=WEBP_Q, method=5)
     print(f'  civilians: {len(meta)} residents, {len(flat)} frames, atlas {atlas.size}')
     return {'sheet': 'civ.webp', 'people': meta}
+
+
+# --------------------------------------------------------- gang characters
+#
+# The second drop's gang members arrive as one captioned sheet per character:
+# a spec card, then rows tagged "WALK (8)", "CROUCH FIRE (6)" and so on, with
+# HIT and DEATH tucked into the empty right-hand side of earlier rows and DEATH
+# staggered across two sub-rows.
+#
+# Finding those groups automatically did not work. The captions sit level with
+# the frames they label rather than above them, so a gap-based cut hands back
+# one box holding both the lettering and the body, and the rows overlap each
+# other vertically, so grouping by row cascades into one blob. What is reliable
+# is the sheet's own documentation: the row order is fixed and every row states
+# its frame count. So the bands below are read off the sheet once, and each is
+# then cut into exactly the number of frames its caption claims -- no counting,
+# no guessing where one pose ends.
+#
+# Boxes are (x0, y0, x1, y1) in sheet pixels.
+
+GANGS = {
+    'capuz': {
+        'name': 'Capuz', 'weapon': 'pistol',
+        'file': 'Photo Aug 13 2026, 7 15 42 PM (18) (1).png',
+        'rows': [
+            ('idle', 4, (400, 0, 880, 168)),
+            ('walk', 8, (95, 168, 1035, 322)),
+            ('run', 8, (95, 330, 1100, 458)),
+            ('crouch', 4, (95, 460, 575, 558)),
+            ('hit', 3, (1055, 460, 1390, 632)),
+            ('crouchShoot', 6, (95, 558, 920, 652)),
+            ('shoot', 6, (95, 652, 920, 812)),
+            ('death', 0, (980, 650, 1524, 812)),
+            ('prone', 4, (0, 812, 505, 902)),
+            ('proneCrawl', 6, (530, 815, 1430, 900)),
+            ('proneShoot', 6, (0, 902, 1530, 1020)),
+        ],
+    },
+    'pano': {
+        'name': 'Pano', 'weapon': 'shotgun',
+        'file': 'Photo Aug 13 2026, 7 15 42 PM (19).png',
+        'rows': [
+            ('idle', 4, (455, 0, 965, 180)),
+            ('walk', 8, (340, 180, 1310, 322)),
+            ('run', 8, (120, 330, 1310, 465)),
+            ('crouch', 4, (95, 465, 590, 548)),
+            ('hit', 3, (1035, 465, 1410, 630)),
+            ('crouchShoot', 6, (95, 548, 910, 648)),
+            ('shoot', 6, (85, 648, 910, 800)),
+            ('death', 0, (985, 645, 1524, 800)),
+            ('prone', 4, (0, 803, 600, 886)),
+            ('proneCrawl', 6, (565, 805, 1530, 884)),
+            ('proneShoot', 6, (0, 886, 1530, 990)),
+        ],
+    },
+}
+
+CAPTION_H = 26     # no caption glyph or rule is taller than this
+CAPTION_W = 46     # a single letter is no wider than this
+CAPTION_RATIO = 2.2  # a whole caption line is long and low; a flash is not
+
+
+def erase_captions(im):
+    """Rub the row captions off a sheet, leaving the artwork.
+
+    The lettering sits inside the bands the frames are cut from, so it has to
+    go before cutting or it ends up welded to the first pose of its row. Text is
+    removed a glyph at a time: every blob small enough to be a letter goes, and
+    the threshold is set below a muzzle flash so the shooting frames keep theirs.
+    """
+    a = np.asarray(im).copy()
+    lab, n = ndimage.label(a[:, :, 3] > 32, structure=np.ones((3, 3)))
+    if not n:
+        return im
+    doomed = np.zeros(n + 1, bool)
+    for i, sl in enumerate(ndimage.find_objects(lab), start=1):
+        h = sl[0].stop - sl[0].start
+        w = sl[1].stop - sl[1].start
+        if h <= CAPTION_H and (w <= CAPTION_W or w >= h * CAPTION_RATIO):
+            doomed[i] = True
+    a[:, :, 3] = np.where(doomed[lab], 0, a[:, :, 3])
+    return Image.fromarray(a, 'RGBA')
+
+
+def blob_frames(mask, box):
+    """Cut a band into whole bodies rather than into a fixed count.
+
+    Used for the death rows, where the poses are strewn across two staggered
+    sub-rows that overlap in x -- no vertical cut can separate them, but the
+    bodies are far enough apart to come away as separate blobs. They are then
+    read in the order they are laid out: upper sub-row first, left to right.
+    """
+    x0, y0, x1, y1 = box
+    sub = mask[y0:y1, x0:x1]
+    lab, n = ndimage.label(ndimage.binary_dilation(sub, iterations=3),
+                           structure=np.ones((3, 3)))
+    parts = []
+    for sl in ndimage.find_objects(lab):
+        w, h = sl[1].stop - sl[1].start, sl[0].stop - sl[0].start
+        if w > 60 and h > 30:
+            parts.append((x0 + sl[1].start, y0 + sl[0].start,
+                          x0 + sl[1].stop, y0 + sl[0].stop))
+    if not parts:
+        return []
+    tops = [p[1] for p in parts]
+    mid = (min(tops) + max(tops)) / 2
+    return sorted(parts, key=lambda p: (p[1] > mid, p[0]))
+
+
+def build_gang(key, spec, raw, out_dir):
+    from slicer import trim
+    im = erase_captions(
+        Image.open(os.path.join(raw, 'Props', 'Caracter', spec['file'])).convert('RGBA'))
+    mask = np.asarray(im)[:, :, 3] > 32
+
+    anims = {}
+    for name, count, box in spec['rows']:
+        b = trim(mask, box)
+        if b is None:
+            continue
+        boxes = blob_frames(mask, b) if count == 0 else split_count(mask, b, 'x', count)
+        anims[name] = [im.crop(p) for p in boxes]
+
+    anims['roster'] = anims['idle'][:1]
+    got = {k: len(v) for k, v in anims.items()}
+    want = dict(GANG_COUNTS, roster=1, death=got.get('death', 0))
+    if got != want:
+        print(f'    {key}: got {got}, wanted {want}')
+
+    scales = anim_scales(anims)
+    frames, meta = [], {}
+    for name, seq in anims.items():
+        entries = []
+        for f in seq:
+            sf = scaled(f, scales[name])
+            entries.append({'i': len(frames), 'ax': round(anchor_x(sf), 1),
+                            'w': sf.width, 'h': sf.height})
+            frames.append(sf)
+        meta[name] = entries
+
+    atlas, place = pack(frames)
+    for name in meta:
+        for e in meta[name]:
+            x, y = place[e['i']]
+            e['x'], e['y'] = x, y
+            del e['i']
+
+    atlas.save(os.path.join(out_dir, f'{key}.webp'), quality=WEBP_Q, method=5)
+    print(f'  {key}: {len(frames)} frames, atlas {atlas.size}')
+    return {'name': spec['name'], 'weapon': spec['weapon'],
+            'sheet': f'{key}.webp', 'anims': meta}
+
+
+GANG_COUNTS = {
+    'idle': 4, 'walk': 8, 'run': 8, 'crouch': 4, 'hit': 3, 'crouchShoot': 6,
+    'shoot': 6, 'death': 6, 'prone': 4, 'proneCrawl': 6, 'proneShoot': 6,
+}
 
 
 # Entry point stays last: main() reaches for tables defined below it.

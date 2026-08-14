@@ -66,8 +66,28 @@ export function charSpec(key) {
   return assets.manifest.characters[key];
 }
 
+// Not every character sheet carries every animation -- the gang sheets have no
+// walk-and-aim, for instance -- so each one names the pose to borrow instead.
+const FALLBACK = {
+  walkAim: 'shoot',
+  shoot: 'idle',
+  crouchShoot: 'crouch',
+  crouch: 'idle',
+  proneShoot: 'prone',
+  prone: 'proneCrawl',
+  proneCrawl: 'prone',
+  hit: 'idle',
+  death: 'idle',
+  roster: 'idle',
+  run: 'walk',
+};
+
 export function anim(key, name) {
-  return assets.manifest.characters[key].anims[name];
+  const anims = assets.manifest.characters[key].anims;
+  let seen = 0;
+  let want = name;
+  while (want && !anims[want]?.length && seen++ < 6) want = FALLBACK[want];
+  return anims[want] || anims.idle;
 }
 
 /** Frame `i` of an animation, wrapping so callers can pass a free-running counter. */
