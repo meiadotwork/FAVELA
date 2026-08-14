@@ -124,6 +124,7 @@ export function tryFire(world, a) {
   a.firing = true;
   a.animTime = 0;
   world.shake = Math.min(9, world.shake + (a.team === 'player' ? 2.6 : 1.1));
+  world.gunfire = { x: from.x, time: world.time };
   world.flashes.push({ x: from.x, y: from.y, t: 0.06, r: 46 });
   sfxShot(a.weapon, Math.abs(a.x - world.camX - 640));
   if (a.ammo <= 0) {

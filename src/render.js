@@ -6,6 +6,7 @@
 import { assets, drawFrame } from './assets.js';
 import { GROUND_Y } from './level.js';
 import { currentFrame, poseHeight, STANCE, WEAPONS } from './actors.js';
+import { civFrame } from './civilians.js';
 
 export const W = 1280;
 export const H = 720;
@@ -29,6 +30,8 @@ export function drawWorld(ctx, world) {
   drawHouses(ctx, level, camX);
   drawGround(ctx, level, camX);
   drawProps(ctx, level, camX);
+
+  drawCivilians(ctx, world);
 
   // Cover and bodies interleave: anything the player can hide behind is drawn
   // after them, so ducking actually puts the wall in front of the body.
@@ -240,6 +243,21 @@ function drawVehicle(ctx, c) {
   ctx.fill();
   ctx.drawImage(img, c.x0, GROUND_Y - h, w, h);
   ctx.restore();
+}
+
+function drawCivilians(ctx, world) {
+  for (const c of world.civilians) {
+    if (c.x < world.camX - 200 || c.x > world.camX + W + 200) continue;
+    const frame = civFrame(c);
+    if (!frame) continue;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.24)';
+    ctx.beginPath();
+    ctx.ellipse(c.x, GROUND_Y + 3, frame.w * 0.4, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    drawFrame(ctx, 'civ', frame, c.x, GROUND_Y, c.facing, 1, 1);
+  }
 }
 
 // --------------------------------------------------------------- actors

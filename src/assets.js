@@ -46,6 +46,10 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
     jobs.push(loadImage(`${base}/${manifest.caveirao.file}`)
       .then((img) => { assets.caveirao = img; }));
   }
+  if (manifest.civilians) {
+    jobs.push(loadImage(`${base}/${manifest.civilians.sheet}`)
+      .then((img) => { assets.sheets.civ = img; }));
+  }
   for (const [kind, frames] of Object.entries(manifest.fx || {})) {
     assets.fx[kind] = [];
     frames.forEach((f, i) => {

@@ -13,6 +13,7 @@ import {
   makeActor, updatePlayer, updateEnemy, updateBullets, updateParticles, WEAPONS,
 } from './actors.js';
 import { drawWorld, drawHud, drawMinimap, W, H } from './render.js';
+import { spawnCivilians, updateCivilians } from './civilians.js';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
@@ -53,6 +54,8 @@ function startLevel(levelIndex, playerKey) {
     flashes: [],
     fx: [],
     fxMeta: assets.manifest.fx || {},
+    civilians: [],
+    gunfire: null,
     camX: 0,
     shake: 0,
     time: 0,
@@ -69,6 +72,7 @@ function startLevel(levelIndex, playerKey) {
       }
     },
   };
+  spawnCivilians(world, Math.round(level.width / 230));
   game.world = world;
   return world;
 }
@@ -117,6 +121,7 @@ function updatePlay(dt) {
     if (a.team !== 'player') updateEnemy(world, a, dt);
   }
   updateBullets(world, dt);
+  updateCivilians(world, dt);
   updateParticles(world, dt);
 
   // Bodies linger a while, then are cleared out.

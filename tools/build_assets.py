@@ -378,6 +378,7 @@ def main(raw, out_dir, houses=32, walls=10):
     manifest['buildings'], manifest['walls'] = build_buildings(raw, out_dir, houses, walls)
     manifest['cars'], manifest['caveirao'] = build_vehicles(raw, out_dir)
     manifest['fx'] = build_fx(raw, out_dir)
+    manifest['civilians'] = build_civilians(raw, out_dir)
     with open(os.path.join(out_dir, 'assets.json'), 'w') as f:
         json.dump(manifest, f, separators=(',', ':'))
     print('wrote', os.path.join(out_dir, 'assets.json'))
@@ -589,6 +590,138 @@ def build_fx(raw, out_dir):
     return out
 
 
+
+
+# ------------------------------------------------------------- civilians
+#
+# The residents come on two crowded sheets: many different people, several
+# frames each, laid out in rows with nothing marking where one person ends and
+# the next begins. They are cut by connected components rather than by the grid
+# slicer -- nobody is carrying a rifle that reaches into the next frame, so the
+# figures come apart cleanly -- and then split into individuals by outfit
+# colour, since each resident is dressed differently and their frames are
+# adjacent on the sheet.
+
+CIVILIAN_SHEETS = [
+    'Photo Aug 13 2026, 7 15 42 PM (17).png',
+    'Photo Aug 13 2026, 7 15 42 PM (17) (1).png',
+]
+CIVILIAN_M = 1.72        # height of the tallest adult on a sheet
+CIV_MIN_FRAMES = 3
+CIV_SPLIT = 34.0         # colour distance that means a different person
+
+
+def figures(path):
+    """Every separate figure on a sheet, in reading order."""
+    im = Image.open(path).convert('RGBA')
+    mask = ndimage.binary_dilation(np.asarray(im)[:, :, 3] > 32, iterations=2)
+    lab, _ = ndimage.label(mask, structure=np.ones((3, 3)))
+    boxes = [(s[1].start, s[0].start, s[1].stop, s[0].stop)
+             for s in ndimage.find_objects(lab)
+             if s[1].stop - s[1].start > 40 and s[0].stop - s[0].start > 90]
+    if not boxes:
+        return im, []
+
+    # Two residents who happen to overlap come back as one blob; drop those
+    # rather than ship a person with a stranger fused to their shoulder.
+    widths = sorted(b[2] - b[0] for b in boxes)
+    typical = widths[len(widths) // 2]
+    boxes = [b for b in boxes if b[2] - b[0] < typical * 1.6]
+
+    rows = []
+    for b in sorted(boxes, key=lambda b: b[1]):
+        cy = (b[1] + b[3]) / 2
+        for r in rows:
+            if min(x[1] for x in r) <= cy <= max(x[3] for x in r):
+                r.append(b)
+                break
+        else:
+            rows.append([b])
+    out = []
+    for r in sorted(rows, key=lambda r: min(x[1] for x in r)):
+        out.extend(sorted(r, key=lambda b: b[0]))
+    return im, out
+
+
+def outfit(im):
+    """Mean colour of head, torso and legs: a fingerprint of what they wear."""
+    a = np.asarray(im)
+    alpha = a[:, :, 3] > 40
+    parts = []
+    for lo, hi in ((0.0, 0.34), (0.34, 0.66), (0.66, 1.0)):
+        y0, y1 = int(im.height * lo), max(int(im.height * hi), int(im.height * lo) + 1)
+        sel = alpha[y0:y1]
+        rgb = a[y0:y1, :, :3][sel]
+        parts.extend(rgb.mean(axis=0) if len(rgb) else [0, 0, 0])
+    return np.array(parts, float)
+
+
+def build_civilians(raw, out_dir):
+    src = os.path.join(raw, 'Props', 'Caracter')
+    people = []
+    for name in CIVILIAN_SHEETS:
+        path = os.path.join(src, name)
+        if not os.path.exists(path):
+            continue
+        im, boxes = figures(path)
+        if not boxes:
+            continue
+        crops = [im.crop(b) for b in boxes]
+        sigs = [outfit(c) for c in crops]
+
+        # Walk the sheet in reading order and start a new person whenever the
+        # clothes change; each resident's frames sit together.
+        runs, run = [], [0]
+        for i in range(1, len(crops)):
+            if np.linalg.norm(sigs[i] - sigs[i - 1]) > CIV_SPLIT:
+                runs.append(run)
+                run = []
+            run.append(i)
+        runs.append(run)
+
+        # One scale for the whole sheet, so the children stay shorter than the
+        # adults instead of every resident being normalised to one height.
+        tallest = max(c.height for c in crops)
+        factor = CIVILIAN_M * PX_PER_M / tallest
+
+        for r in runs:
+            if len(r) < CIV_MIN_FRAMES:
+                continue
+            frames = [crops[i] for i in r]
+            standing = max(f.height for f in frames)
+            walk = [f for f in frames if f.height >= standing * 0.93]
+            panic = [f for f in frames if f.height < standing * 0.93]
+            if len(walk) < 2:
+                walk, panic = frames, []
+            people.append({'walk': walk, 'panic': panic or walk, 'factor': factor})
+
+    if not people:
+        return []
+
+    flat, meta = [], []
+    for p in people:
+        entry = {}
+        for anim in ('walk', 'panic'):
+            seq = []
+            for f in p[anim]:
+                sf = scaled(f, p['factor'])
+                seq.append({'i': len(flat), 'ax': round(anchor_x(sf), 1),
+                            'w': sf.width, 'h': sf.height})
+                flat.append(sf)
+            entry[anim] = seq
+        meta.append(entry)
+
+    atlas, place = pack(flat)
+    for entry in meta:
+        for seq in entry.values():
+            for e in seq:
+                x, y = place[e['i']]
+                e['x'], e['y'] = x, y
+                del e['i']
+
+    atlas.save(os.path.join(out_dir, 'civ.webp'), quality=WEBP_Q, method=5)
+    print(f'  civilians: {len(meta)} residents, {len(flat)} frames, atlas {atlas.size}')
+    return {'sheet': 'civ.webp', 'people': meta}
 
 
 # Entry point stays last: main() reaches for tables defined below it.

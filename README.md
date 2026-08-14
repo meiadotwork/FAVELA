@@ -53,7 +53,14 @@ in bursts, and hit for half — because perfect tracking in their hands is not a
 fight, it is a formality.
 
 **Police levels open with the code**: three firework pops over the hill, the
-lookouts' signal that the police are coming up, then the sirens.
+lookouts' signal that the police are coming up, then the sirens. A caveirao is
+parked in the alley on those levels — armoured throughout, the one piece of
+cover nothing shoots through.
+
+**The street is inhabited.** Residents walk the lane on their own business and
+run for it when a shot goes off nearby, heads down, dropping whatever they were
+carrying. They cannot be shot — bullets pass through them — so the street
+emptying is atmosphere and a warning, never a target.
 
 Roughly every third house is climbable — a ladder at one end, a roof to fight
 down from.
@@ -64,6 +71,7 @@ down from.
 index.html, style.css
 src/
   game.js      screens, waves, the main loop
+  civilians.js residents of the lane, and what makes them run
   level.js     level layout, cover boxes, the bullet-blocking rule
   actors.js    stances, shooting, enemy AI
   render.js    parallax favela, cover, weather, HUD
@@ -86,7 +94,7 @@ pip install pillow numpy scipy
 python3 tools/build_assets.py /path/to/raw-drop assets
 ```
 
-Two things in there are worth knowing about, because the raw art fought back:
+Four things in there are worth knowing about, because the raw art fought back:
 
 **The sheets have no grid.** Each is a loose arrangement of poses — 5×2 here, a
 single stacked column there — and the poses overlap, a rifle barrel routinely
@@ -103,8 +111,38 @@ crouch is legitimately shorter than a stride. Matching the square root of opaque
 area does: it survives the change of pose, so every sheet lands on one scale and
 the crouch keeps its crouch.
 
+**Props are sized from real dimensions.** The art states its own scale — the
+character sheets are captioned "1.78 m · 110 px" and every impact effect gives
+the width it covers — so vehicles and effects are scaled from metres rather than
+eyeballed, and a car parked next to a man is the size a car actually is. The
+car's cover geometry comes from its sprite, so the sill that stops a bullet is
+the sill drawn on the bodywork.
+
+**The residents had to be told apart.** They arrive on crowded sheets, many
+different people with several frames each and nothing marking where one ends and
+the next begins. They are cut by connected components rather than the grid slicer
+— none of them is carrying a rifle that reaches into the next frame — and then
+split into individuals by the mean colour of head, torso and legs, since every
+resident is dressed differently and their frames sit together on the sheet.
+Frames shorter than that person's standing height are their panic poses, which is
+how the flee animation is found without labelling anything.
+
 Sound is synthesised at runtime — the drop had no audio, and a firefight is
 mostly noise bursts and sirens.
+
+### Sheets the pipeline cannot read
+
+The two captioned gang characters (GANG_CAPUZ, GANG_PANO) are not built. Their
+sheets caption each row at the same height as its first frame, with no gap, so
+the cut returns a single box holding both the lettering and the body; and HIT and
+DEATH are parked in the empty right-hand side of earlier rows, with DEATH's six
+frames staggered across two sub-rows. Neither row grouping nor caption anchoring
+survives that.
+
+They will build as they are if re-exported the way the effects sheet is laid out:
+one animation per row, the caption clear above the frames rather than level with
+them, and a uniform cell pitch with each pose inside its own cell. Ruled cell
+borders help — that is how the effects sheet is cut.
 
 ## Credit
 
