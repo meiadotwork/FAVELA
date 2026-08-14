@@ -589,6 +589,9 @@ def build_fx(raw, out_dir):
     return out
 
 
+
+
+# Entry point stays last: main() reaches for tables defined below it.
 if __name__ == '__main__':
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     main(sys.argv[1], sys.argv[2], *[int(a) for a in sys.argv[3:5]])
