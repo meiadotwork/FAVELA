@@ -1,0 +1,60 @@
+:root { color-scheme: dark; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: #0b0b0d;
+  overflow: hidden;
+  font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+/* The canvas keeps its 16:9 shape and takes whichever axis runs out first. */
+#game {
+  width: 100vw;
+  height: calc(100vw * 9 / 16);
+  max-height: 100vh;
+  max-width: calc(100vh * 16 / 9);
+  display: block;
+  background: #14141a;
+  touch-action: none;
+  image-rendering: auto;
+}
+
+#boot {
+  position: absolute;
+  display: grid;
+  gap: 14px;
+  place-items: center;
+  color: #e8e2d4;
+  letter-spacing: .5em;
+  font-size: 13px;
+  text-indent: .5em;
+}
+
+#boot.done { display: none; }
+
+#bar {
+  width: 220px;
+  height: 3px;
+  background: #2a2a32;
+  overflow: hidden;
+}
+
+#bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #f2c14e;
+  transition: width .2s ease-out;
+}
