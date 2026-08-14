@@ -34,6 +34,7 @@ function box(kind, x, w, h, opts = {}) {
     x, w, h,
     x0: x - w / 2,
     x1: x + w / 2,
+    base: opts.base || 0,          // the terrace it stands on
     material: opts.material || 'concrete',
     glass: opts.glass || null,     // [lo, hi] in metres
     front: opts.front !== false,   // drawn over the actors
@@ -86,12 +87,24 @@ export function setProps(props) {
  * comes from the far end, so every corner between here and there is a place one
  * side or the other can fight from.
  */
+/**
+ * The lane goes uphill.
+ *
+ * A favela is terraces and the stairs between them, so the ground is a profile
+ * rather than a line: flat runs at a fixed height, joined by flights that climb
+ * about two metres each. Everything vertical in the game -- where feet are,
+ * where a round buries itself, how high a wall stands -- is measured off this
+ * profile, so a man on the third terrace is genuinely three storeys above the
+ * one shooting up at him.
+ */
 const LANE = [
   { prop: 'casa', at: 28, mine: true },
   { prop: 'muro', at: 41.5 },
+  { stair: 46 },
   { prop: 'barraco', at: 53 },
   { prop: 'sobrado', at: 67 },
-  { prop: 'muro', at: 76 },
+  { stair: 73 },
+  { prop: 'muro', at: 78 },
   { prop: 'casebre', at: 85 },
 ];
 
@@ -111,20 +124,38 @@ export function buildArena(seed = 7) {
   const art = [];
   const roofs = [];
   const climbs = [];
+  const terrain = [];
   let mine = null;
 
+  // Walk the lane once to lay the ground down: flat to the next flight, up it,
+  // flat again. The stair artwork gives the rise and the run.
+  const stair = PROPS.escada?.metres || { w: 3.6, rise: 2.1, art: 2.56 };
+  let gx = 0;
+  let gy = 0;
+  for (const item of LANE.filter((i) => i.stair).sort((a, b) => a.stair - b.stair)) {
+    terrain.push({ x0: gx, x1: item.stair, y0: gy, y1: gy });
+    terrain.push({ x0: item.stair, x1: item.stair + stair.w, y0: gy, y1: gy + stair.rise, stair: true });
+    art.push({ prop: 'escada', x0: item.stair, w: stair.w, y: gy });
+    gx = item.stair + stair.w;
+    gy += stair.rise;
+  }
+  terrain.push({ x0: gx, x1: len, y0: gy, y1: gy });
+
   for (const item of LANE) {
+    if (item.stair) continue;
     const spec = PROPS[item.prop];
     if (!spec) continue;
     const m = spec.metres;
     const x0 = item.at;
     const x1 = x0 + m.w;
-    art.push({ prop: item.prop, x0, w: m.w, h: m.art });
+    // A building stands on the terrace its near corner is on.
+    const base = heightOn(terrain, x0);
+    art.push({ prop: item.prop, x0, w: m.w, h: m.art, y: base });
 
     if (m.roof < 1.6) {
       // A low wall is cover along its whole length: you crouch behind it, and
       // standing up puts your muzzle over the top of it.
-      covers.push(box('wall', (x0 + x1) / 2, m.w, m.roof, { material: 'concrete' }));
+      covers.push(box('wall', (x0 + x1) / 2, m.w, m.roof, { material: 'concrete', base }));
       continue;
     }
 
@@ -133,6 +164,7 @@ export function buildArena(seed = 7) {
     for (const [cx, side] of [[x0 + HOUSE.jut / 2, -1], [x1 - HOUSE.jut / 2, 1]]) {
       const c = box('corner', cx, HOUSE.jut, m.roof, {
         material: 'concrete',
+        base,
         mine: !!item.mine && side > 0,
       });
       covers.push(c);
@@ -140,11 +172,11 @@ export function buildArena(seed = 7) {
     }
 
     if (m.climb && m.clear) {
-      roofs.push({ y: m.roof, x0: x0 + m.clear[0], x1: x0 + m.clear[1] });
+      roofs.push({ y: base + m.roof, x0: x0 + m.clear[0], x1: x0 + m.clear[1] });
       climbs.push({
         foot: x0 - 0.5,                      // at the foot of the near wall
         landing: x0 + m.clear[0] + 0.5,      // and over the parapet
-        top: m.roof,
+        top: base + m.roof,
       });
     }
   }
@@ -158,6 +190,7 @@ export function buildArena(seed = 7) {
     art,
     roofs,
     climbs,
+    terrain,
     corner,
     // Everything arrives from up the lane, so one side of the corner is safe.
     threat: 1,
@@ -171,7 +204,7 @@ export function buildArena(seed = 7) {
 
 /** Solid height of a box at a given point: the glass band is a hole in it. */
 function solidAt(cover, y) {
-  if (y > cover.h) return false;
+  if (y > cover.base + cover.h || y < cover.base) return false;
   if (cover.glass && y >= cover.glass[0] && y <= cover.glass[1]) return false;
   return true;
 }
@@ -187,7 +220,8 @@ export function hitCover(cover, x0, y0, x1, y1) {
   let t0 = 0;
   let t1 = 1;
 
-  for (const [p, q0, q1, lo, hi] of [[dx, x0, x1, cover.x0, cover.x1], [dy, y0, y1, 0, cover.h]]) {
+  const top = cover.base + cover.h;
+  for (const [p, q0, q1, lo, hi] of [[dx, x0, x1, cover.x0, cover.x1], [dy, y0, y1, cover.base, top]]) {
     if (Math.abs(p) < 1e-9) {
       if (q0 < lo || q0 > hi) return -1;
       continue;
@@ -245,11 +279,25 @@ export function coverSlot(cover, fromX) {
   return cover.x + side * (cover.w / 2 + 0.35);
 }
 
+/** How high the ground is at a point on the lane. */
+function heightOn(terrain, x) {
+  for (const t of terrain) {
+    if (x < t.x0 || x > t.x1) continue;
+    const k = t.x1 > t.x0 ? (x - t.x0) / (t.x1 - t.x0) : 0;
+    return t.y0 + (t.y1 - t.y0) * k;
+  }
+  const last = terrain[terrain.length - 1];
+  return x < terrain[0].x0 ? terrain[0].y0 : (last ? last.y1 : 0);
+}
+
+export const groundAt = (arena, x) => heightOn(arena.terrain, x);
+
 /** The climb within reach of a body standing here, or null. */
 export function climbAt(arena, x, y) {
   for (const c of arena.climbs || []) {
-    const near = y > 0.01 ? c.landing : c.foot;
-    if (Math.abs(x - near) < 1.4 && (y < 0.01 || Math.abs(y - c.top) < 0.01)) return c;
+    const onRoof = Math.abs(y - c.top) < 0.05;
+    const near = onRoof ? c.landing : c.foot;
+    if (Math.abs(x - near) < 1.4) return c;
   }
   return null;
 }

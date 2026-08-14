@@ -5,7 +5,7 @@
 // pellet crossing the lane at 95 m/s still finds the car door it should hit.
 
 import { WORLD, SUPPRESSION, BODY } from './tuning.js';
-import { traceCover } from './world.js';
+import { traceCover, groundAt } from './world.js';
 import { damageActor, zoneAt, hitbox, bodyHeight, posX } from './actor.js';
 
 // Where to aim on a body, tried in order: centre mass first, then the parts
@@ -112,10 +112,12 @@ export function stepBullets(game, dt) {
     const cov = traceCover(arena, b.x, b.y, nx, ny);
     if (cov && (!hit || cov.t < hit.t)) hit = { t: cov.t, cover: cov.cover, x: cov.x, y: cov.y };
 
-    // The ground.
-    if (ny <= 0 && (!hit || (b.y / Math.max(1e-6, b.y - ny)) < hit.t)) {
-      const t = b.y / Math.max(1e-6, b.y - ny);
-      if (!hit || t < hit.t) hit = { t, ground: true };
+    // The ground, wherever the hill has put it under this round.
+    const gy = groundAt(arena, nx);
+    if (ny <= gy) {
+      const drop = Math.max(1e-6, (b.y - gy) - (ny - gy));
+      const t = Math.max(0, (b.y - gy) / drop);
+      if (!hit || t < hit.t) hit = { t, ground: true, gy };
     }
 
     // Whoever it went past, on either side, gets rattled -- but only along the
@@ -147,7 +149,7 @@ export function stepBullets(game, dt) {
       } else if (hit.cover) {
         game.onImpact(hx, hy, hit.cover.material, b);
       } else if (hit.ground) {
-        game.onImpact(hx, 0.02, 'dirt', b);
+        game.onImpact(hx, hit.gy + 0.02, 'dirt', b);
       }
       continue;
     }

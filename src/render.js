@@ -7,7 +7,7 @@
 
 import { PX_PER_M, SPRITE_SCALE, FEEL } from './tuning.js';
 import { assets, anim, frameAt, drawFrame } from './assets.js';
-import { rng, HOUSE, PROPS } from './world.js';
+import { rng, HOUSE, PROPS, groundAt } from './world.js';
 import { paintHouse } from './props.js';
 import { bodyHeight, strideOf, posX } from './actor.js';
 
@@ -186,28 +186,38 @@ function drawBackdrop() {
   }
 }
 
-function drawGround() {
+function drawGround(arena) {
   const { ctx, W, H } = view;
   const tile = view.dirt;
-  const y = view.groundY - 6;
+  if (!view.dirtPattern) view.dirtPattern = ctx.createPattern(tile, 'repeat');
 
-  const base = ctx.createLinearGradient(0, sy(2.4), 0, view.groundY);
-  base.addColorStop(0, 'rgba(18,13,16,0)');
-  base.addColorStop(0.45, 'rgba(20,13,13,0.4)');
-  base.addColorStop(1, 'rgba(20,13,12,0.88)');
-  ctx.fillStyle = base;
-  ctx.fillRect(0, sy(2.4), W, view.groundY - sy(2.4) + 2);
+  // The hillside, as one filled shape: trace the terrain profile across the
+  // screen and close it off the bottom. Terraces, flights and the flat lane are
+  // the same path, so nothing has to know which it is drawing.
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(-2, H + 2);
+  const x0 = toWorldX(-2);
+  const x1 = toWorldX(W + 2);
+  const step = 0.4;
+  for (let x = x0; x <= x1; x += step) ctx.lineTo(sx(x), sy(groundAt(arena, x)) + 4);
+  ctx.lineTo(W + 2, sy(groundAt(arena, x1)) + 4);
+  ctx.lineTo(W + 2, H + 2);
+  ctx.closePath();
+  ctx.clip();
 
-  const offset = ((view.cam.x * pxm()) % tile.width + tile.width) % tile.width;
-  for (let x = -offset; x < W; x += tile.width) {
-    ctx.drawImage(tile, Math.round(x), y, tile.width, tile.height);
-  }
-  const shade = ctx.createLinearGradient(0, y, 0, H);
-  shade.addColorStop(0, 'rgba(20,12,8,0.55)');
-  shade.addColorStop(0.25, 'rgba(20,12,8,0)');
-  shade.addColorStop(0.8, 'rgba(10,6,4,0.55)');
+  ctx.save();
+  ctx.translate(-((view.cam.x * pxm()) % tile.width), 0);
+  ctx.fillStyle = view.dirtPattern;
+  ctx.fillRect(0, sy(groundAt(arena, view.cam.x)) - tile.height, W + tile.width * 2, H);
+  ctx.restore();
+
+  const shade = ctx.createLinearGradient(0, sy(0), 0, H);
+  shade.addColorStop(0, 'rgba(20,12,8,0)');
+  shade.addColorStop(0.7, 'rgba(10,6,4,0.5)');
   ctx.fillStyle = shade;
-  ctx.fillRect(0, y, W, H - y);
+  ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 }
 
 // --- the house -----------------------------------------------------------
@@ -224,13 +234,14 @@ function drawBuildings(arena) {
     const w = item.w * pxm();
     const x = sx(item.x0);
     if (x > W || x + w < 0) continue;
+    const foot = sy(item.y || 0);
     if (img) {
       const h = (img.height / img.width) * w;
-      ctx.drawImage(img, x, sy(0) - h, w, h);
+      ctx.drawImage(img, x, foot - h, w, h);
     } else if (item.prop === 'casa') {
       if (!view.house) view.house = paintHouse(HOUSE);
       const { canvas, metres } = view.house;
-      ctx.drawImage(canvas, x, sy(0) - metres * pxm(), w, metres * pxm());
+      ctx.drawImage(canvas, x, foot - metres * pxm(), w, metres * pxm());
     }
   }
 
@@ -240,7 +251,7 @@ function drawBuildings(arena) {
   shade.addColorStop(0, 'rgba(0,0,0,0)');
   shade.addColorStop(1, 'rgba(0,0,0,0.3)');
   ctx.fillStyle = shade;
-  ctx.fillRect(sx(c.x0 - 3.5), sy(c.h), 3.5 * pxm(), c.h * pxm());
+  ctx.fillRect(sx(c.x0 - 3.5), sy(c.base + c.h), 3.5 * pxm(), c.h * pxm());
   void PROPS;
 }
 
@@ -423,7 +434,7 @@ export function renderFrame(game) {
   ctx.translate(shakeX, shakeY);
 
   drawBackdrop();
-  drawGround();
+  drawGround(game.arena);
 
   drawBuildings(game.arena);
 

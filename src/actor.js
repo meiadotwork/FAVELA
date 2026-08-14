@@ -7,7 +7,7 @@
 import {
   STANCES, STANCE_TIME, STANCE_ORDER, WEAPONS, BODY, HEALTH, SUPPRESSION, FEEL, AI, deg,
 } from './tuning.js';
-import { climbAt, roofSpan } from './world.js';
+import { climbAt, roofSpan, groundAt } from './world.js';
 
 let nextId = 1;
 
@@ -132,7 +132,7 @@ export function tryClimb(a, game) {
   const up = a.y < spot.top - 0.01;
   a.climb = {
     from: a.y,
-    to: up ? spot.top : 0,
+    to: up ? spot.top : groundAt(game.arena, spot.foot),
     x: up ? spot.landing : spot.foot,
     t: 0,
     dur: up ? FEEL.climbUp : FEEL.climbDown,
@@ -318,11 +318,11 @@ export function updateActor(a, dt, game) {
   a.x = Math.max(1, Math.min(game.arena.length - 1, a.x));
 
   // A roof is a shelf you can walk along and fall off the end of, so a man up
-  // there is held to the span he climbed onto.
-  if (a.y > 0) {
-    const span = roofSpan(game.arena, a.y);
-    if (span) a.x = Math.max(span[0], Math.min(span[1], a.x));
-  }
+  // there is held to the span he climbed onto. Everyone else stands on the
+  // ground, which on this hill is a profile rather than a line.
+  const span = roofSpan(game.arena, a.y);
+  if (span) a.x = Math.max(span[0], Math.min(span[1], a.x));
+  else a.y = groundAt(game.arena, a.x);
 
   a.step += Math.abs(a.vx) * dt;
 

@@ -34,9 +34,9 @@ function drawCoverBoxes(game) {
   for (const c of game.arena.covers) {
     const x = sx(c.x0);
     const w = c.w * pxm();
-    const top = sy(c.h);
+    const top = sy(c.base + c.h);
     ctx.strokeStyle = 'rgba(120,220,255,0.55)';
-    ctx.strokeRect(x, top, w, sy(0) - top);
+    ctx.strokeRect(x, top, w, sy(c.base) - top);
 
     // The top edge is the rule: below it, a round is stopped.
     ctx.strokeStyle = '#7cd6ff';
