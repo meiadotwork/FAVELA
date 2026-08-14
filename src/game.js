@@ -22,7 +22,7 @@ import { drawHud, drawTitle, drawPause, drawDead, drawRotateHint } from './hud.j
 import { drawDebug } from './debug.js';
 import {
   resumeAudio, toggleMute, playShot, playImpact, playDry, playReloadDone,
-  playHurt, playKill, playUi,
+  playHurt, playKill, playUi, playStep,
 } from './audio.js';
 
 const STEP = 1 / 60;
@@ -106,6 +106,14 @@ game.onKill = (actor, from) => {
   } else {
     game.screen = 'dead';
   }
+};
+
+// A footfall, from whoever is walking -- weighted by how hard the foot lands.
+game.onFootstep = (a) => {
+  const dist = Math.abs(a.x - view.cam.x);
+  const running = Math.abs(a.vx) > 2.2;
+  const weight = a.stance === 'prone' ? 0.35 : a.stance === 'crouch' ? 0.6 : running ? 1.25 : 0.9;
+  playStep(weight, Math.max(-1, Math.min(1, (a.x - view.cam.x) / 12)), dist);
 };
 
 game.onNearMiss = () => {};

@@ -105,12 +105,16 @@ export function makeInput(canvas) {
   const layout = () => {
     const w = canvas.width;
     const h = canvas.height;
+    // One row along the bottom, thumb-height, biggest thing nearest the corner:
+    // the trigger is where the thumb already rests and reload is its neighbour,
+    // because those are the two you reach for under fire.
+    const y = h - 96;
     input.pads = [
-      { a: 'fire', x: w - 150, y: h - 160, r: 86, label: 'TIRO' },
-      { a: 'stance', x: w - 310, y: h - 108, r: 58, label: 'AGACHA' },
-      { a: 'reload', x: w - 160, y: h - 344, r: 54, label: 'CARREGA' },
-      { a: 'swap', x: w - 320, y: h - 268, r: 50, label: 'ARMA' },
-      { a: 'run', x: w - 455, y: h - 100, r: 46, label: 'CORRE' },
+      { a: 'fire', x: w - 112, y: y - 4, r: 82, label: 'TIRO' },
+      { a: 'reload', x: w - 268, y, r: 52, label: 'CARREGA' },
+      { a: 'stance', x: w - 388, y, r: 52, label: 'AGACHA' },
+      { a: 'swap', x: w - 508, y, r: 52, label: 'ARMA' },
+      { a: 'run', x: w - 628, y, r: 52, label: 'CORRE' },
     ];
   };
   layout();

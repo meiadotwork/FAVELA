@@ -51,7 +51,8 @@ export function makeActor(opts) {
     intent: blankIntent(),
     anim: 'idle',
     animT: 0,
-    step: 0,                       // gait phase, so feet keep time with speed
+    step: 0,                       // ground covered, which is what paces the gait
+    foot: 0,                       // footfalls taken, counted off that distance
     brain: null,
   };
 }
@@ -108,6 +109,20 @@ export function startReload(a) {
   if (a.reloading > 0 || a.mag >= w.mag || a.reserve <= 0 || busy(a)) return;
   a.reloading = w.reload;
   a.reloadShell = w.shellReload;
+}
+
+/**
+ * How much ground one footfall covers, here and now.
+ *
+ * This is the number that keeps the feet on the floor: the walk cycle is two
+ * of these, and both the animation and the footstep sound are counted off the
+ * distance travelled rather than off a clock, so the stride matches the speed
+ * at any speed and there is no gliding.
+ */
+export function strideOf(a) {
+  const s = STANCES[a.stance];
+  const running = Math.abs(a.vx) > s.walk * 1.25;
+  return running ? s.strideRun : s.stride;
 }
 
 /** The cone a shot leaves in: the gun, the stance, and how much you are moving. */
@@ -241,6 +256,12 @@ export function updateActor(a, dt, game) {
   a.x += a.vx * dt;
   a.x = Math.max(1, Math.min(game.arena.length - 1, a.x));
   a.step += Math.abs(a.vx) * dt;
+
+  const foot = Math.floor(a.step / strideOf(a));
+  if (foot !== a.foot) {
+    a.foot = foot;
+    if (Math.abs(a.vx) > 0.1) game.onFootstep(a);
+  }
 
   // --- aim. Facing follows the gun when there is something to shoot at, and
   // the direction of travel when there is not.

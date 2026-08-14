@@ -191,10 +191,12 @@ function touchPads(game) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(pad.x, pad.y, pad.r, 0, 6.283);
-    ctx.fillStyle = lit ? 'rgba(242,193,78,0.20)' : 'rgba(240,238,230,0.06)';
+    // Dark glass with a bright rim: legible against dirt or a lit wall alike,
+    // and still something you can see the lane through.
+    ctx.fillStyle = lit ? 'rgba(242,193,78,0.32)' : 'rgba(12,10,12,0.42)';
     ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = lit ? 'rgba(242,193,78,0.85)' : 'rgba(240,238,230,0.28)';
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = lit ? 'rgba(255,214,120,0.95)' : 'rgba(240,238,230,0.62)';
     ctx.stroke();
 
     // The weapon button says which weapon, since that is the question you ask
@@ -202,8 +204,8 @@ function touchPads(game) {
     const text = pad.a === 'swap' ? WEAPONS[p.weapon].name : pad.label;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `${pad.r > 60 ? 15 : 11}px "Trebuchet MS", system-ui, sans-serif`;
-    ctx.fillStyle = lit ? GOLD : 'rgba(240,238,230,0.6)';
+    ctx.font = `${pad.r > 60 ? 16 : 12}px "Trebuchet MS", system-ui, sans-serif`;
+    ctx.fillStyle = lit ? '#fff1c8' : 'rgba(240,238,230,0.92)';
     ctx.fillText(text, pad.x, pad.y);
     ctx.restore();
   }

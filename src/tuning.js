@@ -27,6 +27,8 @@ export const STANCES = {
     walk: 1.55,          // m/s
     run: 4.0,
     steady: 1.0,         // spread multiplier -- higher is worse
+    stride: 0.75,        // metres of ground per footfall, which paces the gait
+    strideRun: 1.35,
     anim: { idle: 'idle', move: 'walk', run: 'run', fire: 'shoot', moveFire: 'walkAim' },
   },
   crouch: {
@@ -36,6 +38,8 @@ export const STANCES = {
     walk: 0.95,
     run: 0.95,
     steady: 0.62,
+    stride: 0.52,
+    strideRun: 0.52,
     anim: { idle: 'crouch', move: 'crouch', run: 'crouch', fire: 'crouchShoot', moveFire: 'crouchShoot' },
   },
   prone: {
@@ -45,6 +49,8 @@ export const STANCES = {
     walk: 0.45,
     run: 0.45,
     steady: 0.38,
+    stride: 0.38,
+    strideRun: 0.38,
     anim: { idle: 'prone', move: 'proneCrawl', run: 'proneCrawl', fire: 'proneShoot', moveFire: 'proneShoot' },
   },
 };

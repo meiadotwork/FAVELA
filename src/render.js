@@ -7,7 +7,7 @@
 import { PX_PER_M, SPRITE_SCALE, FEEL } from './tuning.js';
 import { assets, anim, frameAt, drawFrame } from './assets.js';
 import { rng } from './world.js';
-import { bodyHeight } from './actor.js';
+import { bodyHeight, strideOf } from './actor.js';
 
 export const view = {
   ctx: null,
@@ -266,12 +266,21 @@ function drawCover(cover) {
 
 // --- actors --------------------------------------------------------------
 
-/** Which frame of an animation an actor is on, given how it is moving. */
-function frameIndex(a) {
+/**
+ * Which frame of an animation an actor is on.
+ *
+ * Walking, running and crawling are counted off the ground covered, not off a
+ * clock: one cycle of the animation is two footfalls, so however fast the legs
+ * are carrying him the feet land where they are planted. Everything else --
+ * firing, flinching, dying -- runs on time, because none of it is a gait.
+ */
+function frameIndex(a, n) {
+  const moving = Math.abs(a.vx) > 0.15;
   switch (a.anim) {
-    case 'walk': case 'walkAim': case 'crouch': return Math.floor(a.step / 0.72);
-    case 'run': return Math.floor(a.step / 1.05);
-    case 'proneCrawl': return Math.floor(a.step / 0.45);
+    case 'walk': case 'walkAim': case 'run': case 'proneCrawl':
+      return Math.floor((a.step / (2 * strideOf(a))) * n);
+    case 'crouch':
+      return moving ? Math.floor((a.step / (2 * strideOf(a))) * n) : Math.floor(a.animT * 5);
     case 'shoot': case 'crouchShoot': case 'proneShoot': return Math.floor(a.animT * 22);
     case 'hit': return Math.min(2, Math.floor(a.animT * 18));
     case 'death': return Math.floor(a.dying * 11);
@@ -295,10 +304,10 @@ export function drawActor(a) {
   const { ctx } = view;
   drawShadow(a);
   const dead = !a.alive;
-  const i = frameIndex(a);
 
   // Loops wrap; a death animation plays once and stays down.
   const frames = anim(a.key, a.anim);
+  const i = frameIndex(a, frames.length);
   const f = dead
     ? frames[Math.min(frames.length - 1, i)]
     : frameAt(a.key, a.anim, i);
