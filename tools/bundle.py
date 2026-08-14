@@ -76,8 +76,7 @@ def collect_assets(quality=None):
         wanted.append(manifest['house']['file'])
     for spec in manifest.get('props', {}).values():
         wanted.append(spec['file'])
-    if manifest.get('climb'):
-        wanted.append(manifest['climb']['sheet'])
+    wanted += list(manifest.get('sheets', {}).values())
 
     files = {}
     for rel in dict.fromkeys(wanted):

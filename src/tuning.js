@@ -41,7 +41,10 @@ export const STANCES = {
     steady: 0.62,
     stride: 0.50,
     strideRun: 0.50,
-    anim: { idle: 'crouch', move: 'crouch', run: 'crouch', fire: 'crouchShoot', moveFire: 'crouchShoot' },
+    anim: {
+      idle: 'crouch', move: 'crouchWalk', run: 'crouchWalk',
+      fire: 'crouchShoot', moveFire: 'crouchWalk',
+    },
   },
   prone: {
     name: 'DEITADO',

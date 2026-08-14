@@ -56,9 +56,10 @@ export async function loadAssets(base = 'assets', onProgress = () => {}) {
     }));
   }
 
-  if (manifest.climb) {
-    jobs.push(loadImage(`${base}/${manifest.climb.sheet}`)
-      .then((img) => { assets.sheets.climb = img; }));
+  // Shared sheets: animations that arrived on their own drop rather than on a
+  // character's atlas, which frames name for themselves when they are drawn.
+  for (const [name, file] of Object.entries(manifest.sheets || {})) {
+    jobs.push(loadImage(`${base}/${file}`).then((img) => { assets.sheets[name] = img; }));
   }
 
   if (manifest.civilians) {
@@ -85,6 +86,7 @@ export function charSpec(key) {
 // walk-and-aim, for instance -- so each one names the pose to borrow instead.
 const FALLBACK = {
   climb: 'walk',          // for anyone whose sheet has no climb of their own
+  crouchWalk: 'crouch',   // ditto the crouched gait
   walkAim: 'shoot',
   shoot: 'idle',
   crouchShoot: 'crouch',

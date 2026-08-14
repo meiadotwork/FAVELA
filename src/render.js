@@ -256,7 +256,7 @@ function drawBuildings(arena) {
 function frameIndex(a, n) {
   const moving = Math.abs(a.vx) > 0.15;
   switch (a.anim) {
-    case 'walk': case 'walkAim': case 'run': case 'proneCrawl':
+    case 'walk': case 'walkAim': case 'run': case 'proneCrawl': case 'crouchWalk':
       return Math.floor((a.step / (2 * strideOf(a))) * n);
     case 'crouch':
       return moving ? Math.floor((a.step / (2 * strideOf(a))) * n) : Math.floor(a.animT * 5);
